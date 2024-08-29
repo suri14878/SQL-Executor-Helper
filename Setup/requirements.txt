@@ -1,0 +1,5 @@
+oracledb==2.4.1             # Used for connecting to oracle database
+pandas==2.2.2				# Used for excel writer in server
+configparser==7.1.0         # Used for reading config files
+psycopg[binary]==3.2.1      # Used for connecting to postgres database
+logging==0.4.9.6            # Used for logging
