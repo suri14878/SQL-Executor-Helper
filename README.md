@@ -4,7 +4,7 @@
 The SQL Executor Helper project will help to interact with both Postgres and Oracle Databases. This will serve as the primary access pattern/system to submit.
 
 ## How to Install the Project
-Below are the steps to install and execute the SQLAutomation project:
+Below are the steps to install and execute the SQL-Executor-Helper project:
 
 1. Clone the repository:
    ```git clone https://github.com/your-username/SQL-Executor-Helper.git```
