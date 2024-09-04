@@ -16,4 +16,4 @@ Below are the steps to install and execute the SQL-Executor-Helper project:
 ## How to Test the project
 4. Put any sample query in `Test/SQL Files/sample.sql` file.
 5. Make sure that you have correct configs for database in `Configs/Database_Config.ini`.
-6. Run the `Main.py` file.
+6. Run the `Test/Test.py` file.
