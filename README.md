@@ -14,6 +14,6 @@ Below are the steps to install and execute the SQLAutomation project:
 3. Set up the default configurations. Run the `Create Configs.py` file in the `Setup` folder. This will create a configs subfolder and configuration files for the logger.
 
 ## How to Test the project
-4. Put any sample query in `SQL Files/sample.sql` file.
-5. Choose the database which you want to connect in `Main.py` file.
+4. Put any sample query in `Test/SQL Files/sample.sql` file.
+5. Make sure that you have correct configs for database in `Configs/Database_Config.ini`.
 6. Run the `Main.py` file.

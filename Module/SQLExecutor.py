@@ -1,6 +1,9 @@
 import oracledb
 import psycopg
+from psycopg.rows import dict_row
 import configparser
+import csv
+from openpyxl import Workbook
 from Module.Helpers import Logger
 
 # Abstract base class defining the general interface for all database connections
@@ -30,6 +33,11 @@ class GeneralCursor:
     
     def fetchone(self):
         raise NotImplementedError("Subclass must implement this method")
+    
+    @property
+    def description(self):
+        """Expose the description attribute from the underlying cursor."""
+        raise NotImplementedError("Subclass must implement this method")
 
 # Concrete class for PostgreSQL database connection
 class PostgresConnection(GeneralConnection):
@@ -49,7 +57,8 @@ class PostgresConnection(GeneralConnection):
                 port=config[env_section]['port'],
                 user=config[env_section]['user'],
                 password=config[env_section]['password'],
-                dbname=config[env_section]['dbname']
+                dbname=config[env_section]['dbname'],
+                row_factory=dict_row
             )
             self.logger.info(f"Connected to PostgreSQL database: {config[env_section]['dbname']}")
 
@@ -98,6 +107,11 @@ class PostgresCursor(GeneralCursor):
     def fetchmany(self, size):
         """Fetches a specific number of rows from the query result."""
         return self.__cursor.fetchmany(size)
+
+    @property
+    def description(self):
+        """Expose the description attribute from the underlying cursor."""
+        return self.__cursor.description
 
 # Concrete class for Oracle database connection
 class OracleConnection(GeneralConnection):
@@ -154,21 +168,35 @@ class OracleCursor(GeneralCursor):
         try:
             self.__cursor.execute(query, params or {})
             self.logger.info("Executed query on Oracle.")
+
         except oracledb.DatabaseError as e:
             self.logger.error(f"Failed to execute query on Oracle: {str(e)}")
             raise
 
     def fetchone(self):
         """Fetches one row from the query result."""
+        self.__apply_row_factory()
         return self.__cursor.fetchone()
 
     def fetchall(self):
         """Fetches all rows from the query result."""
+        self.__apply_row_factory()
         return self.__cursor.fetchall()
 
     def fetchmany(self, size):
         """Fetches a specific number of rows from the query result."""
+        self.__apply_row_factory()
         return self.__cursor.fetchmany(size)
+
+    @property
+    def description(self):
+        """Expose the description attribute from the underlying cursor."""
+        return self.__cursor.description
+    
+    def __apply_row_factory(self):
+        """Applies the row factory to format rows as dictionaries with column names as keys."""
+        columns = [col[0] for col in self.__cursor.description]
+        self.__cursor.rowfactory = lambda *args: dict(zip(columns, args))
 
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
@@ -186,8 +214,6 @@ class SQLExecutor:
     def close(self):
         """Closes the database connection."""
         self.__db_connection.close()
-
-
 
     def execute_query(self, query, params=None):
         """Executes a SQL query on the connected database."""
@@ -231,13 +257,65 @@ class SQLExecutor:
             self.logger.error(f"Failed to fetch {size} rows: {str(e)}")
             raise
 
-    # def save_to_file(self, data, file_path, file_format='csv'):
-    #     df = pd.DataFrame(data)
-    #     if file_format == 'csv':
-    #         df.to_csv(file_path, index=False)
-    #     elif file_format == 'txt':
-    #         df.to_csv(file_path, sep='\t', index=False)
-    #     elif file_format == 'excel':
-    #         df.to_excel(file_path, index=False)
-    #     else:
-    #         raise ValueError("Unsupported file format")
+    def save_to_csv(self, data, file_path):
+        """Saves data to a CSV file with column names."""
+        try:
+            if not data:  # Check if data is empty
+                self.logger.warning(f"No data to save to {file_path}. The file will not be created.")
+                return
+        
+            if isinstance(data, dict):  # If data is a single dictionary, wrap it in a list
+                data = [data]
+
+            with open(file_path, 'w', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=data[0].keys())
+                writer.writeheader()
+                writer.writerows(data)
+            self.logger.info(f"Data saved to {file_path} as CSV.")
+        except Exception as e:
+            self.logger.error(f"Failed to save data to CSV: {str(e)}")
+            raise
+
+    def save_to_txt(self, data, file_path):
+        """Saves data to a TXT file with column names, using tab-separated values."""
+        try:
+            if not data:  # Check if data is empty
+                self.logger.warning(f"No data to save to {file_path}. The file will not be created.")
+                return
+        
+            if isinstance(data, dict):  # If data is a single dictionary, wrap it in a list
+                data = [data]
+
+            with open(file_path, 'w') as file:
+                # Writing headers
+                file.write('\t'.join(data[0].keys()) + '\n')
+                # Writing data
+                for row in data:
+                    file.write('\t'.join(map(str, row.values())) + '\n')
+            self.logger.info(f"Data saved to {file_path} as TXT.")
+        except Exception as e:
+            self.logger.error(f"Failed to save data to TXT: {str(e)}")
+            raise
+
+    def save_to_excel(self, data, file_path):
+        """Saves data to an Excel file with column names."""
+        try:
+            if not data:  # Check if data is empty
+                self.logger.warning(f"No data to save to {file_path}. The file will not be created.")
+                return
+        
+            if isinstance(data, dict):  # If data is a single dictionary, wrap it in a list
+                data = [data]
+
+            wb = Workbook()
+            ws = wb.active
+            # Writing headers
+            ws.append(list(data[0].keys()))
+            # Writing data
+            for row in data:
+                ws.append(list(row.values()))
+            wb.save(file_path)
+            self.logger.info(f"Data saved to {file_path} as Excel.")
+        except Exception as e:
+            self.logger.error(f"Failed to save data to Excel: {str(e)}")
+            raise
