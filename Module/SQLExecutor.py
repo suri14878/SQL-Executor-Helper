@@ -1,3 +1,4 @@
+import os
 import oracledb
 import psycopg
 from psycopg.rows import dict_row
@@ -5,6 +6,7 @@ import configparser
 import csv
 from openpyxl import Workbook
 from Module.Helpers import Logger
+from Module.enums.file_types import FileType
 
 # Abstract base class defining the general interface for all database connections
 class GeneralConnection:
@@ -233,6 +235,58 @@ class SQLExecutor:
             self.logger.error(f"Failed to execute SQL file: {str(e)}")
             raise
 
+    def execute_multiQuery_file(self, file_path, params=None):
+        """Executes multiple SQL queries from a file."""
+        try:
+            with open(file_path, 'r') as file:
+                queries = file.read()
+
+            all_results = []  # Store results from all queries
+
+            # Split the queries by semicolon, and execute each query
+            for query in queries.split(';'):
+                query = query.strip()
+                if query:  # Ignore empty statements
+                    self.execute_query(query, params)
+                    self.logger.info(f"Executed SQL query: {query}")
+                    
+                    # If it's a SELECT query, fetch results and store them
+                    if query.lower().startswith('select'):
+                        results = self.fetchall()
+                        all_results.append(results)
+
+            return all_results
+        
+        except FileNotFoundError as e:
+            self.logger.error(f"SQL file not found: {file_path}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to execute SQL file: {str(e)}")
+            raise
+
+    def execute_folder_and_save(self, folder_path, file_type: FileType, save_path=''):
+        """Executes multiple SQL files from a folder."""
+        
+        # Check if the provided path is a valid directory
+        if not os.path.isdir(folder_path):
+            self.logger.error(f"The provided path '{folder_path}' is not a valid directory.")
+            return
+
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+
+            # Check if the path is a file (and not a directory)
+            if os.path.isfile(file_path):
+                self.logger.info(f"Reading file: {filename}")
+                data = self.execute_multiQuery_file(file_path)
+                if file_type == FileType.CSV:
+                    self.save_multiQuery_to_csv(data,filename,save_path)
+                elif file_type == FileType.TXT:
+                    self.save_multiQuery_to_txt(data,filename,save_path)
+                elif file_type == FileType.EXCEL:
+                    self.save_multiQuery_to_excel(data,filename,save_path)
+                
+
     def fetchone(self):
         """Fetches one row from the last executed query."""
         try:
@@ -274,6 +328,32 @@ class SQLExecutor:
             self.logger.info(f"Data saved to {file_path} as CSV.")
         except Exception as e:
             self.logger.error(f"Failed to save data to CSV: {str(e)}")
+            raise
+
+    def save_multiQuery_to_csv(self, list_data, file_name, file_path=''):
+        """Saves data to a CSV file with column names."""
+        self.template_for_saving_data(list_data, file_name, file_path, self.save_to_csv, 'csv')
+
+    def save_multiQuery_to_txt(self, list_data, file_name, file_path=''):
+        """Saves data to a Text file with column names."""
+        self.template_for_saving_data(list_data, file_name, file_path, self.save_to_txt, 'txt')
+
+    def save_multiQuery_to_excel(self, list_data, file_name, file_path=''):
+        """Saves data to a Excel file with column names."""
+        self.template_for_saving_data(list_data, file_name, file_path, self.save_to_excel, 'xlsx')
+
+    def template_for_saving_data(self, list_data, file_name, file_path, save_function, file_type):
+        try:
+            if not list_data:  # Check if data is empty
+                self.logger.warning(f"No data to save to {file_name}. The file will not be created.")
+                return
+            
+            preceding_zeros = len(str(len(list_data)))
+
+            for i,data in enumerate(list_data):
+                save_function(data,f"{file_path}{file_name}_{str(i+1).zfill(preceding_zeros)}.{file_type}")
+        except Exception as e:
+            self.logger.error(f"Failed to save data to {file_type}: {str(e)}")
             raise
 
     def save_to_txt(self, data, file_path):

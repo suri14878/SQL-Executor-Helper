@@ -3,7 +3,7 @@ import os,sys, shutil
 import csv
 from openpyxl import load_workbook
 
-# # Get the parent directory
+# Get the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 from Module.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection
@@ -12,12 +12,27 @@ class TestSQLExecutorIntegration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Setup the test environment: create tables and insert test data."""
-        cls.oracle_db = SQLExecutor(OracleConnection())
-        cls.oracle_db.connect(config_file='./Configs/Database_Config.ini', environment='test')
+        """Common Setup for initializing and testing databases."""
+
+        # Can comment any database if want to test only the other.
+        cls.databases = {
+            'oracle': SQLExecutor(OracleConnection()),
+            'postgres': SQLExecutor(PostgresConnection())
+        }
+
+        for db_type, db in cls.databases.items():
+            db.connect(config_file='./Configs/Database_Config.ini', environment='test')
+            if db_type == 'oracle':
+                cls.setup_oracle(db)
+            elif db_type == 'postgres':
+                cls.setup_postgres(db)
         
-        # Drop and create the TestActors table in Oracle
-        cls.oracle_db.execute_query("""
+        os.mkdir('./Test/TestFiles')
+
+    @classmethod
+    def setup_oracle(cls, db):
+        """Setup Oracle-specific tables and data."""
+        db.execute_query("""
         BEGIN
            EXECUTE IMMEDIATE 'DROP TABLE TestActors CASCADE CONSTRAINTS';
         EXCEPTION
@@ -27,8 +42,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
               END IF;
         END;
         """)
-                
-        cls.oracle_db.execute_query("""
+        db.execute_query("""
             CREATE TABLE TestActors (
                 PK_ID INTEGER PRIMARY KEY,
                 NAME VARCHAR(100),
@@ -37,20 +51,17 @@ class TestSQLExecutorIntegration(unittest.TestCase):
             )
         """)
         for i in range(1, 6):
-            cls.oracle_db.execute_query(f"""
+            db.execute_query(f"""
                 INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
                 VALUES ({i}, 'Actor {i}', 'Male', 'Bio of Actor {i}')
             """)
-        cls.oracle_db.execute_query("COMMIT")
-        cls.postgres_db = SQLExecutor(PostgresConnection())
-        cls.postgres_db.connect(config_file='./Configs/Database_Config.ini', environment='test')
-        
-        # Drop and create the TestActors table in Postgres
-        cls.postgres_db.execute_query("""
-        DROP TABLE IF EXISTS TestActors CASCADE;
-        """)
-        
-        cls.postgres_db.execute_query("""
+        db.execute_query("COMMIT")
+
+    @classmethod
+    def setup_postgres(cls, db):
+        """Setup Postgres-specific tables and data."""
+        db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE;")
+        db.execute_query("""
             CREATE TABLE TestActors (
                 PK_ID SERIAL PRIMARY KEY,
                 NAME VARCHAR(100),
@@ -58,149 +69,56 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                 BIO TEXT
             )
         """)
-        
         for i in range(1, 6):
-            cls.postgres_db.execute_query(f"""
+            db.execute_query(f"""
                 INSERT INTO TestActors (NAME, SEX, BIO)
                 VALUES ('Actor {i}', 'Male', 'Bio of Actor {i}')
             """)
-        cls.postgres_db.execute_query("COMMIT")
-
-        os.mkdir('./Test/TestFiles') 
+        db.execute_query("COMMIT")
 
 
-    def test_oracle_fetchAll_save_to_files(self):
-        """Test Oracle DB features: save to CSV, TXT, Excel."""
-        self.oracle_db.execute_file('./Test/SQL Files/sample.sql')
-        data = self.oracle_db.fetchall()
+    def test_fetchAll_save_to_files(self):
+        """Test Database features: save to CSV, TXT, Excel."""
 
-        # Save to files
-        output_dir = './Test/TestFiles'
-        self.oracle_db.save_to_csv(data, os.path.join(output_dir, 'oracle_fetchAll_test.csv'))
-        self.oracle_db.save_to_txt(data, os.path.join(output_dir, 'oracle_fetchAll_test.txt'))
-        self.oracle_db.save_to_excel(data, os.path.join(output_dir, 'oracle_fetchAll_test.xlsx'))
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                db.execute_file('./Test/SQL Files/sample.sql')
+                data = db.fetchall()
+                self.save_and_verify_files(db, db_type, data, 'fetchAll')
 
-        # Check if files exist
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchAll_test.csv')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchAll_test.txt')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchAll_test.xlsx')))
-
-        # Verify file contents
-        self.verify_csv_content(os.path.join(output_dir, 'oracle_fetchAll_test.csv'), data)
-        self.verify_txt_content(os.path.join(output_dir, 'oracle_fetchAll_test.txt'), data)
-        self.verify_excel_content(os.path.join(output_dir, 'oracle_fetchAll_test.xlsx'), data)
-
-    def test_postgres_fetchAll_save_to_files(self):
-        """Test Postgres DB features: save to CSV, TXT, Excel."""
-        self.postgres_db.execute_file('./Test/SQL Files/sample.sql')
-        data = self.postgres_db.fetchall()
-
-        # Save to files
-        output_dir = './Test/TestFiles'
-        self.postgres_db.save_to_csv(data, os.path.join(output_dir, 'postgres_fetchAll_test.csv'))
-        self.postgres_db.save_to_txt(data, os.path.join(output_dir, 'postgres_fetchAll_test.txt'))
-        self.postgres_db.save_to_excel(data, os.path.join(output_dir, 'postgres_fetchAll_test.xlsx'))
-
-        # Check if files exist
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchAll_test.csv')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchAll_test.txt')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchAll_test.xlsx')))
-
-        # Verify file contents
-        self.verify_csv_content(os.path.join(output_dir, 'postgres_fetchAll_test.csv'), data)
-        self.verify_txt_content(os.path.join(output_dir, 'postgres_fetchAll_test.txt'), data)
-        self.verify_excel_content(os.path.join(output_dir, 'postgres_fetchAll_test.xlsx'), data)
-
-    def test_oracle_fetchOne_save_to_files(self):
-        """Test Oracle DB features: save to CSV, TXT, Excel."""
-        self.oracle_db.execute_file('./Test/SQL Files/sample.sql')
-        data = self.oracle_db.fetchone()
-
-        # Wrap single row in a list
-        data = [data]
-
-        # Save to files
-        output_dir = './Test/TestFiles'
-        self.oracle_db.save_to_csv(data, os.path.join(output_dir, 'oracle_fetchOne_test.csv'))
-        self.oracle_db.save_to_txt(data, os.path.join(output_dir, 'oracle_fetchOne_test.txt'))
-        self.oracle_db.save_to_excel(data, os.path.join(output_dir, 'oracle_fetchOne_test.xlsx'))
-
-        # Check if files exist
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchOne_test.csv')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchOne_test.txt')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchOne_test.xlsx')))
-
-        # Verify file contents
-        self.verify_csv_content(os.path.join(output_dir, 'oracle_fetchOne_test.csv'), data)
-        self.verify_txt_content(os.path.join(output_dir, 'oracle_fetchOne_test.txt'), data)
-        self.verify_excel_content(os.path.join(output_dir, 'oracle_fetchOne_test.xlsx'), data)
-
-    def test_postgres_fetchOne_save_to_files(self):
-        """Test Postgres DB features: save to CSV, TXT, Excel."""
-        self.postgres_db.execute_file('./Test/SQL Files/sample.sql')
-        data = self.postgres_db.fetchone()
-
-        # Wrap single row in a list
-        data = [data]
-
-        # Save to files
-        output_dir = './Test/TestFiles'
-        self.postgres_db.save_to_csv(data, os.path.join(output_dir, 'postgres_fetchOne_test.csv'))
-        self.postgres_db.save_to_txt(data, os.path.join(output_dir, 'postgres_fetchOne_test.txt'))
-        self.postgres_db.save_to_excel(data, os.path.join(output_dir, 'postgres_fetchOne_test.xlsx'))
-
-        # Check if files exist
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchOne_test.csv')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchOne_test.txt')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchOne_test.xlsx')))
-
-        # Verify file contents
-        self.verify_csv_content(os.path.join(output_dir, 'postgres_fetchOne_test.csv'), data)
-        self.verify_txt_content(os.path.join(output_dir, 'postgres_fetchOne_test.txt'), data)
-        self.verify_excel_content(os.path.join(output_dir, 'postgres_fetchOne_test.xlsx'), data)
-
-    def test_oracle_fetchMany_save_to_files(self):
-        """Test Oracle DB features: save to CSV, TXT, Excel."""
-        self.oracle_db.execute_file('./Test/SQL Files/sample.sql')
-        data = self.oracle_db.fetchmany(3)
-
-        # Save to files
-        output_dir = './Test/TestFiles'
-        self.oracle_db.save_to_csv(data, os.path.join(output_dir, 'oracle_fetchMany_test.csv'))
-        self.oracle_db.save_to_txt(data, os.path.join(output_dir, 'oracle_fetchMany_test.txt'))
-        self.oracle_db.save_to_excel(data, os.path.join(output_dir, 'oracle_fetchMany_test.xlsx'))
-
-        # Check if files exist
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchMany_test.csv')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchMany_test.txt')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'oracle_fetchMany_test.xlsx')))
-
-        # Verify file contents
-        self.verify_csv_content(os.path.join(output_dir, 'oracle_fetchMany_test.csv'), data)
-        self.verify_txt_content(os.path.join(output_dir, 'oracle_fetchMany_test.txt'), data)
-        self.verify_excel_content(os.path.join(output_dir, 'oracle_fetchMany_test.xlsx'), data)
-
-    def test_postgres_fetchMany_save_to_files(self):
-        """Test Postgres DB features: save to CSV, TXT, Excel."""
-        self.postgres_db.execute_file('./Test/SQL Files/sample.sql')
-        data = self.postgres_db.fetchmany(3)
-
-        # Save to files
-        output_dir = './Test/TestFiles'
-        self.postgres_db.save_to_csv(data, os.path.join(output_dir, 'postgres_fetchMany_test.csv'))
-        self.postgres_db.save_to_txt(data, os.path.join(output_dir, 'postgres_fetchMany_test.txt'))
-        self.postgres_db.save_to_excel(data, os.path.join(output_dir, 'postgres_fetchMany_test.xlsx'))
-
-        # Check if files exist
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchMany_test.csv')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchMany_test.txt')))
-        self.assertTrue(os.path.exists(os.path.join(output_dir, 'postgres_fetchMany_test.xlsx')))
-
-        # Verify file contents
-        self.verify_csv_content(os.path.join(output_dir, 'postgres_fetchMany_test.csv'), data)
-        self.verify_txt_content(os.path.join(output_dir, 'postgres_fetchMany_test.txt'), data)
-        self.verify_excel_content(os.path.join(output_dir, 'postgres_fetchMany_test.xlsx'), data)
+    def test_fetchOne_save_to_files(self):
+        """Test fetching one record from both databases and saving to CSV, TXT, Excel."""
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                db.execute_file('./Test/SQL Files/sample.sql')
+                data = [db.fetchone()]
+                self.save_and_verify_files(db, db_type, data, 'fetchOne')
     
+    def test_fetchMany_save_to_files(self):
+        """Test fetching multiple records from both databases and saving to CSV, TXT, Excel."""
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                db.execute_file('./Test/SQL Files/sample.sql')
+                data = db.fetchmany(3)
+                self.save_and_verify_files(db, db_type, data, 'fetchMany')
+    
+    def save_and_verify_files(self, db, db_type, data, fetch_type):
+        """Helper method to save data and verify CSV, TXT, Excel files."""
+        output_dir = './Test/TestFiles'
+        db.save_to_csv(data, os.path.join(output_dir, f'{db_type}_{fetch_type}_test.csv'))
+        db.save_to_txt(data, os.path.join(output_dir, f'{db_type}_{fetch_type}_test.txt'))
+        db.save_to_excel(data, os.path.join(output_dir, f'{db_type}_{fetch_type}_test.xlsx'))
+
+        # Check if files exist
+        self.assertTrue(os.path.exists(os.path.join(output_dir, f'{db_type}_{fetch_type}_test.csv')))
+        self.assertTrue(os.path.exists(os.path.join(output_dir, f'{db_type}_{fetch_type}_test.txt')))
+        self.assertTrue(os.path.exists(os.path.join(output_dir, f'{db_type}_{fetch_type}_test.xlsx')))
+
+        # Verify file contents
+        self.verify_csv_content(os.path.join(output_dir, f'{db_type}_{fetch_type}_test.csv'), data)
+        self.verify_txt_content(os.path.join(output_dir, f'{db_type}_{fetch_type}_test.txt'), data)
+        self.verify_excel_content(os.path.join(output_dir, f'{db_type}_{fetch_type}_test.xlsx'), data)
+
     # Verification methods...
     def verify_csv_content(self, file_path, expected_data):
         """Verify the content of the CSV file."""
@@ -237,27 +155,20 @@ class TestSQLExecutorIntegration(unittest.TestCase):
     # Deleting all the testfiles and close connections
     @classmethod
     def tearDownClass(cls):
-        """Tear down the test environment: drop the test tables."""
-        
-        # Dropping Oracle table
-        try:
-            cls.oracle_db.execute_query("DROP TABLE TestActors CASCADE CONSTRAINTS")
-            cls.oracle_db.execute_query("COMMIT")  # Issue COMMIT separately after the DROP statement
-        except Exception as e:
-            print(f"Error dropping Oracle table: {e}")
-        finally:
-            cls.oracle_db.close()
+        """Tear down the test environment: drop the test tables and clean up."""
+        for db_type, db in cls.databases.items():
+            try:
+                if db_type == 'oracle':
+                    db.execute_query("DROP TABLE TestActors CASCADE CONSTRAINTS")
+                elif db_type == 'postgres':
+                    db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE")
+                db.execute_query("COMMIT")
+            except Exception as e:
+                print(f"Error dropping {db_type} table: {e}")
+            finally:
+                db.close()
 
-        # Dropping Postgres table
-        try:
-            cls.postgres_db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE")
-            cls.postgres_db.execute_query("COMMIT")  # Issue COMMIT separately
-        except Exception as e:
-            print(f"Error dropping Postgres table: {e}")
-        finally:
-            cls.postgres_db.close()
-
-        # Remove the entire TestOutput directory
+        # Remove the TestFiles directory
         output_dir = './Test/TestFiles/'
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
