@@ -8,6 +8,33 @@ from openpyxl import Workbook
 from Module.Helpers import Logger
 from Module.enums.file_types import FileType
 
+class UniqueDictRowFactory:
+    def __init__(self, cursor: psycopg.Cursor):
+        # Check if the query returns a result set (i.e., cursor.description is not None)
+        if cursor.description is None:
+            self.fields = None  # No fields to process if there's no result set
+        else:
+            # Extract column names from cursor.description
+            self.fields = []
+            field_count = {}
+            for col in cursor.description:
+                col_name = col.name
+                if col_name in field_count:
+                    # If the column name already exists, append a unique identifier
+                    field_count[col_name] += 1
+                    col_name = f"{col_name}_{field_count[col_name]}"
+                else:
+                    field_count[col_name] = 0
+                self.fields.append(col_name)
+
+    def __call__(self, values):
+        # If there's no result set (fields are None), return None or an empty dict
+        if self.fields is None:
+            return {}
+        # Otherwise, create a dictionary mapping the unique column names to values
+        return dict(zip(self.fields, values))
+
+
 # Abstract base class defining the general interface for all database connections
 class GeneralConnection:
     def __init__(self):
@@ -60,7 +87,7 @@ class PostgresConnection(GeneralConnection):
                 user=config[env_section]['user'],
                 password=config[env_section]['password'],
                 dbname=config[env_section]['dbname'],
-                row_factory=dict_row
+                row_factory=UniqueDictRowFactory
             )
             self.logger.info(f"Connected to PostgreSQL database: {config[env_section]['dbname']}")
 
@@ -196,9 +223,28 @@ class OracleCursor(GeneralCursor):
         return self.__cursor.description
     
     def __apply_row_factory(self):
-        """Applies the row factory to format rows as dictionaries with column names as keys."""
+        """Applies the row factory to format rows as dictionaries with column names as keys, handling duplicate column names."""
+        # Extract column names from cursor description
         columns = [col[0] for col in self.__cursor.description]
-        self.__cursor.rowfactory = lambda *args: dict(zip(columns, args))
+
+        # Create a dictionary to count occurrences of column names
+        field_count = {}
+        unique_columns = []
+
+        # Handle duplicate column names by appending a suffix
+        for col_name in columns:
+            if col_name in field_count:
+                # If the column name already exists, append a unique identifier
+                field_count[col_name] += 1
+                unique_col_name = f"{col_name}_{field_count[col_name]}"
+            else:
+                field_count[col_name] = 0
+                unique_col_name = col_name
+            unique_columns.append(unique_col_name)
+
+        # Set rowfactory to map unique column names to values
+        self.__cursor.rowfactory = lambda *args: dict(zip(unique_columns, args))
+
 
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
