@@ -4,6 +4,7 @@ import psycopg
 from psycopg.rows import dict_row
 import configparser
 import csv
+import re
 from openpyxl import Workbook
 from Module.Helpers import Logger
 from Module.enums.file_types import FileType
@@ -136,6 +137,12 @@ class PostgresCursor(GeneralCursor):
     def fetchmany(self, size):
         """Fetches a specific number of rows from the query result."""
         return self.__cursor.fetchmany(size)
+    
+    def fetch_paginated(self, query, page_size, page_number, params=None):
+        """Fetches paginated results from the query result for PostgreSQL."""
+        paginated_query = f"{query} LIMIT {page_size} OFFSET {page_size * (page_number - 1)}"
+        self.execute(paginated_query, params)
+        return self.fetchall()
 
     @property
     def description(self):
@@ -216,6 +223,17 @@ class OracleCursor(GeneralCursor):
         """Fetches a specific number of rows from the query result."""
         self.__apply_row_factory()
         return self.__cursor.fetchmany(size)
+    
+    def fetch_paginated(self, query, page_size, page_number, params=None):
+        """Fetches paginated results from the query for Oracle."""
+        offset_value = (page_number - 1) * page_size
+        paginated_query = f"""
+            {query}
+            OFFSET {offset_value} ROWS 
+            FETCH NEXT {page_size} ROWS ONLY
+        """
+        self.execute(paginated_query, params)
+        return self.fetchall()
 
     @property
     def description(self):
@@ -267,19 +285,42 @@ class SQLExecutor:
         """Executes a SQL query on the connected database."""
         self.__cursor.execute(query, params)
 
-    def execute_file(self, file_path, params=None):
+    def execute_file(self, file_path, make_batches=False, make_paginated=False, page_size=0, page_number=1, params=None):
         """Executes SQL queries from a file."""
         try:
             with open(file_path, 'r') as file:
                 query = file.read()
-            self.__cursor.execute(query, params)
-            self.logger.info(f"Executed SQL from file: {file_path}")
+
+            if make_batches and make_paginated:
+                return self.get_batches_by_query(query,page_size,params)
+            elif make_batches:
+                self.__cursor.fetch_paginated(query, page_size, page_number, params)
+            else:
+                self.__cursor.execute(query, params)
+                self.logger.info(f"Executed SQL from file: {file_path}")
         except FileNotFoundError as e:
             self.logger.error(f"SQL file not found: {file_path}")
             raise
         except Exception as e:
             self.logger.error(f"Failed to execute SQL file: {str(e)}")
             raise
+
+    def extract_pagination_info(self, query):
+        """Extracts the pagination information from multiline comments using the pattern '/* PAGINATE SIZE <number> */'."""
+        match = re.search(r'/\*\s*PAGINATE\s+SIZE\s+(\d+)\s*\*/', query, flags=re.IGNORECASE)
+        if match:
+            return True, int(match.group(1))  # Return pagination flag and page size as an integer
+        return False, None  # Return False if no pagination information is found
+
+
+    def get_batches_by_query(self,query, page_size, params=None):
+        _page_number = 1
+        while True:
+            results = self.__cursor.fetch_paginated(query, page_size, _page_number, params)
+            if not results:
+                break  # No more results, stop pagination
+            yield results  # Yield the current page's results
+            _page_number += 1  # Move to the next page
 
     def execute_multiQuery_file(self, file_path, params=None):
         """Executes multiple SQL queries from a file."""
@@ -292,11 +333,28 @@ class SQLExecutor:
             # Split the queries by semicolon, and execute each query
             for query in queries.split(';'):
                 query = query.strip()
-                if query:  # Ignore empty statements
+                if not query:  # Skip empty statements
+                    continue
+
+                # Check for multiline comment '/* PAGINATE SIZE <number> */'
+                paginate, page_size = self.extract_pagination_info(query)
+
+                # Remove the multiline comments from the query
+                query = re.sub(r'/\*.*?\*/', '', query, flags=re.DOTALL)
+
+                if paginate and page_size is not None:
+                    # Paginate this query with the specified page size
+                    batches = self.get_batches_by_query(query, page_size, params)
+                    all_batches = []
+                    for batch in batches:
+                        all_batches.extend(batch)
+
+                    all_results.append(all_batches)
+                else:
+                    # Execute the query normally
                     self.execute_query(query, params)
-                    self.logger.info(f"Executed SQL query: {query}")
-                    
-                    # If it's a SELECT query, fetch results and store them
+
+                    # If it's a SELECT query, fetch the results
                     if query.lower().startswith('select'):
                         results = self.fetchall()
                         all_results.append(results)
@@ -356,25 +414,16 @@ class SQLExecutor:
         except Exception as e:
             self.logger.error(f"Failed to fetch {size} rows: {str(e)}")
             raise
-
-    def save_to_csv(self, data, file_path):
-        """Saves data to a CSV file with column names."""
-        try:
-            if not data:  # Check if data is empty
-                self.logger.warning(f"No data to save to {file_path}. The file will not be created.")
-                return
         
-            if isinstance(data, dict):  # If data is a single dictionary, wrap it in a list
-                data = [data]
-
-            with open(file_path, 'w', newline='') as file:
-                writer = csv.DictWriter(file, fieldnames=data[0].keys())
-                writer.writeheader()
-                writer.writerows(data)
-            self.logger.info(f"Data saved to {file_path} as CSV.")
-        except Exception as e:
-            self.logger.error(f"Failed to save data to CSV: {str(e)}")
-            raise
+    def save_batches(self, batches, result_file, result_file_type: FileType):
+        """Appends these batches in specified file"""
+        for i, batch in enumerate(batches):
+            if result_file_type == FileType.CSV:
+                self.save_to_csv(batch,result_file,is_append=True,include_header=True if i==0 else False)    
+            elif result_file_type == FileType.TXT:
+                self.save_to_txt(batch,result_file,is_append=True,include_header=True if i==0 else False)    
+            elif result_file_type == FileType.EXCEL:
+                self.save_to_excel(batch,result_file, include_header=True if i==0 else False)    
 
     def save_multiQuery_to_csv(self, list_data, file_name, file_path=''):
         """Saves data to a CSV file with column names."""
@@ -402,7 +451,28 @@ class SQLExecutor:
             self.logger.error(f"Failed to save data to {file_type}: {str(e)}")
             raise
 
-    def save_to_txt(self, data, file_path):
+
+    def save_to_csv(self, data, file_path, is_append=False, include_header=True):
+        """Saves data to a CSV file with column names."""
+        try:
+            if not data:  # Check if data is empty
+                self.logger.warning(f"No data to save to {file_path}. The file will not be created.")
+                return
+        
+            if isinstance(data, dict):  # If data is a single dictionary, wrap it in a list
+                data = [data]
+
+            with open(file_path, 'a' if is_append else 'w', newline='') as file:
+                writer = csv.DictWriter(file, fieldnames=data[0].keys())
+                if include_header:
+                    writer.writeheader()
+                writer.writerows(data)
+            self.logger.info(f"Data saved to {file_path} as CSV.")
+        except Exception as e:
+            self.logger.error(f"Failed to save data to CSV: {str(e)}")
+            raise
+
+    def save_to_txt(self, data, file_path, is_append=False, include_header=True):
         """Saves data to a TXT file with column names, using tab-separated values."""
         try:
             if not data:  # Check if data is empty
@@ -412,9 +482,10 @@ class SQLExecutor:
             if isinstance(data, dict):  # If data is a single dictionary, wrap it in a list
                 data = [data]
 
-            with open(file_path, 'w') as file:
+            with open(file_path, 'a' if is_append else 'w', newline='') as file:
                 # Writing headers
-                file.write('\t'.join(data[0].keys()) + '\n')
+                if include_header:
+                    file.write('\t'.join(data[0].keys()) + '\n')
                 # Writing data
                 for row in data:
                     file.write('\t'.join(map(str, row.values())) + '\n')
@@ -423,7 +494,7 @@ class SQLExecutor:
             self.logger.error(f"Failed to save data to TXT: {str(e)}")
             raise
 
-    def save_to_excel(self, data, file_path):
+    def save_to_excel(self, data, file_path, include_header=True):
         """Saves data to an Excel file with column names."""
         try:
             if not data:  # Check if data is empty
@@ -436,7 +507,8 @@ class SQLExecutor:
             wb = Workbook()
             ws = wb.active
             # Writing headers
-            ws.append(list(data[0].keys()))
+            if include_header:
+                ws.append(list(data[0].keys()))
             # Writing data
             for row in data:
                 ws.append(list(row.values()))
