@@ -1,7 +1,5 @@
 oracledb                # Used for connecting to oracle database
-pandas				    # Used for excel writer in server
 configparser            # Used for reading config files
 psycopg[binary]         # Used for connecting to postgres database
 logging                 # Used for logging
 openpyxl                # Used for working with excel files
- 
