@@ -1,7 +1,7 @@
-oracledb==2.4.1             # Used for connecting to oracle database
-pandas==2.2.2				# Used for excel writer in server
-configparser==7.1.0         # Used for reading config files
-psycopg[binary]==3.2.1      # Used for connecting to postgres database
-logging==0.4.9.6            # Used for logging
-openpyxl==3.1.5             # Used for working with excel files
+oracledb                # Used for connecting to oracle database
+pandas				    # Used for excel writer in server
+configparser            # Used for reading config files
+psycopg[binary]         # Used for connecting to postgres database
+logging                 # Used for logging
+openpyxl                # Used for working with excel files
  
