@@ -1,6 +1,8 @@
 import sys, os, importlib
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import Module.Helpers.Logger as Logger
+import Module.Helpers.DatabaseConfig as DatabaseConfig
+import Module.Helpers.TestConfig as TestConfig
 # ClientServerConfigs = importlib.import_module("Modules.Generate Client and Server Configs")
 
 def CreateConfigs():
@@ -8,9 +10,11 @@ def CreateConfigs():
         Logger.CreateLoggerConfig()
         logging = Logger.create_logger()
         logger = logging.getLogger("Create Configs")
-        logger.info("Sucessfully created logger and associated config.")
+        DatabaseConfig.CreateDatabaseConfig()
+        TestConfig.CreateTestConfig()
+        logger.info("Sucessfully created logger, Database and Test config.")
     except Exception as e:
-        print(f"Exception when setting up logger and associated config: {e}")
+        print(f"Exception when setting up logger, Database and Test config: {e}")
     
     try:
         logger.info("Setting up other configs...")

@@ -1,13 +1,15 @@
 import os
 import oracledb
 import psycopg
-from psycopg.rows import dict_row
 import configparser
 import csv
 import re
 from openpyxl import Workbook
 from Module.Helpers import Logger
 from Module.enums.file_types import FileType
+
+
+logging = Logger.create_logger()
 
 class UniqueDictRowFactory:
     def __init__(self, cursor: psycopg.Cursor):
@@ -72,8 +74,7 @@ class GeneralCursor:
 # Concrete class for PostgreSQL database connection
 class PostgresConnection(GeneralConnection):
     def __init__(self):
-        self.logging = Logger.create_logger()
-        self.logger = self.logging.getLogger("Postgres")
+        self.logger = logging.getLogger("Postgres")
         self.__connection = None
 
     def connect(self, config_file, environment):
@@ -113,8 +114,7 @@ class PostgresConnection(GeneralConnection):
 # Concrete class for PostgreSQL cursor
 class PostgresCursor(GeneralCursor):
     def __init__(self, cursor):
-        self.logging = Logger.create_logger()
-        self.logger = self.logging.getLogger("Postgres")
+        self.logger = logging.getLogger("Postgres")
         self.__cursor = cursor
 
     def execute(self, query, params=None):
@@ -152,8 +152,7 @@ class PostgresCursor(GeneralCursor):
 # Concrete class for Oracle database connection
 class OracleConnection(GeneralConnection):
     def __init__(self):
-        self.logging = Logger.create_logger()
-        self.logger = self.logging.getLogger("Oracle")
+        self.logger = logging.getLogger("Oracle")
         self.__connection = None
 
     def connect(self, config_file, environment):
@@ -195,8 +194,7 @@ class OracleConnection(GeneralConnection):
 # Concrete class for Oracle cursor
 class OracleCursor(GeneralCursor):
     def __init__(self, cursor):
-        self.logging = Logger.create_logger()
-        self.logger = self.logging.getLogger("Oracle")
+        self.logger = logging.getLogger("Oracle")
         self.__cursor = cursor
 
     def execute(self, query, params=None):
@@ -267,8 +265,7 @@ class OracleCursor(GeneralCursor):
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
     def __init__(self, db_connection: GeneralConnection):
-        self.logging = Logger.create_logger()
-        self.logger = self.logging.getLogger("Executor")
+        self.logger = logging.getLogger("Executor")
         self.__db_connection = db_connection
         self.__cursor = None
 

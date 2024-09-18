@@ -80,6 +80,16 @@ def create_logger():
         log_file = file_path + file_name + now.strftime(r" %m.%d.%Y %H.%M.%S") + extension
     else:
         log_file = file_path + file_name + extension
+
+    # Get the root logger
+    logger = logging.getLogger()
+    
+    # Clear existing handlers if any, based on the 'Overwrite' option
+    if overwrite == 'TRUE':
+        while logger.hasHandlers():
+            handler = logger.handlers[0]
+            handler.close()  # Close the handler before removing it
+            logger.removeHandler(handler)
        
     handlers = [logging.FileHandler(log_file, mode=f"{'w' if (overwrite=='TRUE') else 'a'}")]
     if(consoleOutput == 'TRUE'):
