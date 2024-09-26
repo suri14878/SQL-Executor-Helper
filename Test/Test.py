@@ -41,15 +41,14 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         cls.databases = {}
         
         if config.getboolean('TestSettings', 'TestOracle'):
-            cls.databases['oracle'] = SQLExecutor(OracleConnection())
+            cls.databases['oracle'] = SQLExecutor(OracleConnection(), config_file='./Configs/Database_Config.ini', environment='test')
         
         if config.getboolean('TestSettings', 'TestPostgres'):
-            cls.databases['postgres'] = SQLExecutor(PostgresConnection())
+            cls.databases['postgres'] = SQLExecutor(PostgresConnection(), config_file='./Configs/Database_Config.ini', environment='test')
 
         # Connect to the databases
         for db_type, db in cls.databases.items():
             try:
-                db.connect(config_file='./Configs/Database_Config.ini', environment='test')
                 cls.logger.info(f"Connected to {db_type} database successfully.")
                 if db_type == 'oracle':
                     cls.setup_oracle(db)
@@ -116,31 +115,32 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Oracle-specific tables and data."""
         cls.logger.info("Setting up Oracle database...")
         try:
-            db.execute_query("""
-            BEGIN
-               EXECUTE IMMEDIATE 'DROP TABLE TestActors CASCADE CONSTRAINTS';
-            EXCEPTION
-               WHEN OTHERS THEN
-                  IF SQLCODE != -942 THEN
-                     RAISE;
-                  END IF;
-            END;
-            """)
-            db.execute_query("""
-                CREATE TABLE TestActors (
-                    PK_ID INTEGER PRIMARY KEY,
-                    NAME VARCHAR(100),
-                    SEX VARCHAR(10),
-                    BIO VARCHAR(1000)
-                )
-            """)
-            for i in range(1, 11):
-                db.execute_query(f"""
-                    INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
-                    VALUES ({i}, 'Actor {i}', 'Male', 'Bio of Actor {i}')
+            with db._get_cursor() as cursor:
+                cursor.execute("""
+                BEGIN
+                EXECUTE IMMEDIATE 'DROP TABLE TestActors CASCADE CONSTRAINTS';
+                EXCEPTION
+                WHEN OTHERS THEN
+                    IF SQLCODE != -942 THEN
+                        RAISE;
+                    END IF;
+                END;
                 """)
-            db.execute_query("COMMIT")
-            cls.logger.info("Oracle database setup completed.")
+                cursor.execute("""
+                    CREATE TABLE TestActors (
+                        PK_ID INTEGER PRIMARY KEY,
+                        NAME VARCHAR(100),
+                        SEX VARCHAR(10),
+                        BIO VARCHAR(1000)
+                    )
+                """)
+                for i in range(1, 11):
+                    cursor.execute(f"""
+                        INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
+                        VALUES ({i}, 'Actor {i}', 'Male', 'Bio of Actor {i}')
+                    """)
+                cursor.execute("COMMIT")
+                cls.logger.info("Oracle database setup completed.")
         except Exception as e:
             cls.logger.error(f"Error setting up Oracle database: {e}")
 
@@ -149,22 +149,23 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Postgres-specific tables and data."""
         cls.logger.info("Setting up Postgres database...")
         try:
-            db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE;")
-            db.execute_query("""
-                CREATE TABLE TestActors (
-                    "PK_ID" SERIAL PRIMARY KEY,
-                    "NAME" VARCHAR(100),
-                    "SEX" VARCHAR(10),
-                    "BIO" TEXT
-                )
-            """)
-            for i in range(1, 11):
-                db.execute_query(f"""
-                    INSERT INTO TestActors ("NAME", "SEX", "BIO")
-                    VALUES ('Actor {i}', 'Male', 'Bio of Actor {i}')
+            with db._get_cursor() as cursor:
+                cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE;")
+                cursor.execute("""
+                    CREATE TABLE TestActors (
+                        "PK_ID" SERIAL PRIMARY KEY,
+                        "NAME" VARCHAR(100),
+                        "SEX" VARCHAR(10),
+                        "BIO" TEXT
+                    )
                 """)
-            db.execute_query("COMMIT")
-            cls.logger.info("Postgres database setup completed.")
+                for i in range(1, 11):
+                    cursor.execute(f"""
+                        INSERT INTO TestActors ("NAME", "SEX", "BIO")
+                        VALUES ('Actor {i}', 'Male', 'Bio of Actor {i}')
+                    """)
+                cursor.execute("COMMIT")
+                cls.logger.info("Postgres database setup completed.")
         except Exception as e:
             cls.logger.error(f"Error setting up Postgres database: {e}")
 
@@ -194,7 +195,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     db.execute_file_and_save(file_name='./Test/SQL Files/singleQuery.sql',result_file_path=os.path.join(output_dir, f'{db_type}_fetchOne_test'),result_file_type=FileType.CSV, batch_size=1)
                     db.execute_file_and_save(file_name='./Test/SQL Files/singleQuery.sql',result_file_path=os.path.join(output_dir, f'{db_type}_fetchOne_test'),result_file_type=FileType.TXT, batch_size=1)
                     db.execute_file_and_save(file_name='./Test/SQL Files/singleQuery.sql',result_file_path=os.path.join(output_dir, f'{db_type}_fetchOne_test'),result_file_type=FileType.EXCEL, batch_size=1)
-                    self.verify_files(self.testActors_data, db_type, 'fetchAll')
+                    self.verify_files(self.testActors_data, db_type, 'fetchOne')
                 except Exception as e:
                     self.logger.error(f"Error in fetchOne test for {db_type}: {e}")
                     raise
@@ -209,7 +210,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     db.execute_file_and_save(file_name='./Test/SQL Files/singleQuery.sql',result_file_path=os.path.join(output_dir, f'{db_type}_fetchMany_test'),result_file_type=FileType.CSV, batch_size=3)
                     db.execute_file_and_save(file_name='./Test/SQL Files/singleQuery.sql',result_file_path=os.path.join(output_dir, f'{db_type}_fetchMany_test'),result_file_type=FileType.TXT, batch_size=3)
                     db.execute_file_and_save(file_name='./Test/SQL Files/singleQuery.sql',result_file_path=os.path.join(output_dir, f'{db_type}_fetchMany_test'),result_file_type=FileType.EXCEL, batch_size=3)
-                    self.verify_files(self.testActors_data, db_type, 'fetchAll')
+                    self.verify_files(self.testActors_data, db_type, 'fetchMany')
                 except Exception as e:
                     self.logger.error(f"Error in fetchMany test for {db_type}: {e}")
                     raise
@@ -365,17 +366,15 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         cls.logger.info("Tearing down test environment...")
         for db_type, db in cls.databases.items():
             try:
-                if db_type == 'oracle':
-                    db.execute_query("DROP TABLE TestActors CASCADE CONSTRAINTS")
-                elif db_type == 'postgres':
-                    db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE")
-                db.execute_query("COMMIT")
-                cls.logger.info(f"{db_type} test table dropped.")
+                with db._get_cursor() as cursor:
+                    if db_type == 'oracle':
+                        cursor.execute("DROP TABLE TestActors CASCADE CONSTRAINTS")
+                    elif db_type == 'postgres':
+                        cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE")
+                    cursor.execute("COMMIT")
+                    cls.logger.info(f"{db_type} test table dropped.")
             except Exception as e:
                 cls.logger.error(f"Error dropping {db_type} table: {e}")
-            finally:
-                db.close()
-                cls.logger.info(f"{db_type} connection closed.")
 
         # Decide whether to clean up files based on config
         if config.getboolean('TestSettings', 'CleanUpFiles'):

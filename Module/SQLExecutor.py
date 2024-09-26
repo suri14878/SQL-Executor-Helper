@@ -117,6 +117,14 @@ class PostgresCursor(GeneralCursor):
         self.logger = logging.getLogger("Postgres")
         self.__cursor = cursor
 
+    def __enter__(self):
+        """Enters the context manager and returns the cursor."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Closes the cursor when exiting the context."""
+        self.__cursor.close()
+
     def execute(self, query, params=None):
         """Executes a SQL query using the PostgreSQL cursor."""
         try:
@@ -191,6 +199,14 @@ class OracleCursor(GeneralCursor):
         self.logger = logging.getLogger("Oracle")
         self.__cursor = cursor
 
+    def __enter__(self):
+        """Enters the context manager and returns the cursor."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Closes the cursor when exiting the context."""
+        self.__cursor.close()
+
     def execute(self, query, params=None):
         """Executes a SQL query using the Oracle cursor."""
         try:
@@ -247,47 +263,18 @@ class OracleCursor(GeneralCursor):
 
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
-    def __init__(self, db_connection: GeneralConnection):
+    def __init__(self, db_connection: GeneralConnection, config_file='config.ini', environment='test'):
         self.logger = logging.getLogger("Executor")
         self.__db_connection = db_connection
-        self.__cursor = None
-
-    def connect(self, config_file='config.ini', environment='test'):
-        """Connects to the database using the provided configuration file and environment."""
         self.__db_connection.connect(config_file, environment)
-        self.__cursor = self.__db_connection.get_cursor()
 
-    def close(self):
-        """Closes the database connection."""
+    def __del__(self):
+        """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
 
-    def execute_query(self, query, params=None):
-        """Executes a SQL query on the connected database."""
-        self.__cursor.execute(query, params)
-    
-    def fetchone(self):
-        """Fetches one row from the last executed query."""
-        try:
-            return self.__cursor.fetchone()
-        except Exception as e:
-            self.logger.error(f"Failed to fetch one row: {str(e)}")
-            raise
-
-    def fetchall(self):
-        """Fetches all rows from the last executed query."""
-        try:
-            return self.__cursor.fetchall()
-        except Exception as e:
-            self.logger.error(f"Failed to fetch all rows: {str(e)}")
-            raise
-
-    def fetchmany(self, size):
-        """Fetches a specific number of rows from the last executed query."""
-        try:
-            return self.__cursor.fetchmany(size)
-        except Exception as e:
-            self.logger.error(f"Failed to fetch {size} rows: {str(e)}")
-            raise
+    def _get_cursor(self):
+        """Returns a new cursor. Each method will call this to open a new cursor."""
+        return self.__db_connection.get_cursor()
 
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
         """Executes SQL queries from a file."""
@@ -313,46 +300,35 @@ class SQLExecutor:
                 # Apply batch_size based of query comments or parameter
                 apply_batch_size = query_page_size if is_paginate else batch_size
 
-                # Remove multiline comments from the query
-                query = re.sub(r'/\*.*?\*/', '', query, flags=re.DOTALL)
-                
                 if (apply_batch_size and apply_batch_size <= 0) or (apply_limit and apply_limit <= 0):
                     self.logger.warning(f"No data has been fetched since batch size or row limit is zero or lesser for query number {i+1} and filename: {file_name}")
-                else:
-                    # If no pagination, process the query based on batch_size
-                    if apply_batch_size == 1:
-                        batch_index = 0 
-                        # Fetch one row at a time and save
-                        while True:
-                            row = self.fetchone()
-                            if not row:  # If no more rows, stop
-                                break
-                            self.save_results([row], f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}", result_file_type, is_append=True, include_header=True if batch_index==0 else False)
-                            batch_index += 1
-                            if apply_limit and batch_index >= apply_limit:
-                                break
-                    elif apply_batch_size and apply_batch_size > 1:
-                        # Fetch rows in specified batch sizes
-                        rows_fetched = 0
-                        batches = self.get_batches_by_query(query, apply_batch_size)
-                        batch_index = 0 
-                        for batch in batches:
-                            # This logic will check that batch_size should be within the row limits.
-                            if apply_limit:
-                                remaining_rows = apply_limit - rows_fetched
-                                if not remaining_rows >= apply_batch_size:
-                                    batch = batch[:remaining_rows]
-                            self.save_results(batch, f"{result_file_path}_{str(i + 1).zfill(preceding_zeros)}", result_file_type, is_append=True, include_header=True if batch_index==0 else False)
-                            rows_fetched += len(batch)
-                            batch_index += 1
-                            if apply_limit and rows_fetched >= apply_limit:
-                                break
-                    else:
-                        self.execute_query(query)
-                        # Fetch all rows at once if no batch size specified
-                        rows = self.fetchall()
+                    continue
+
+                # Handle queries with batch sizes (including 1)
+                if apply_batch_size:
+                    # Fetch rows in specified batch sizes
+                    rows_fetched = 0
+                    batches = self.get_batches_by_query(query, apply_batch_size)
+                    batch_index = 0 
+                    for batch in batches:
+                        # This logic will check that batch_size should be within the row limits.
                         if apply_limit:
-                            rows = rows[:apply_limit]  # Apply row limit
+                            remaining_rows = apply_limit - rows_fetched
+                            if remaining_rows < apply_batch_size:
+                                batch = batch[:remaining_rows]
+                        self.save_results(batch, f"{result_file_path}_{str(i + 1).zfill(preceding_zeros)}", result_file_type, is_append=True, include_header=True if batch_index==0 else False)
+                        rows_fetched += len(batch)
+                        batch_index += 1
+                        if apply_limit and rows_fetched >= apply_limit:
+                            break
+                else:
+                    with self._get_cursor() as cursor:
+                        cursor.execute(query)
+                        # Fetch all rows at once if no batch size specified
+                        if apply_limit:
+                            rows = cursor.fetchmany(apply_limit)
+                        else:
+                            rows = cursor.fetchall()
                         if result_file_type == FileType.CSV:
                             self.save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
                         elif result_file_type == FileType.TXT:
@@ -398,11 +374,12 @@ class SQLExecutor:
 
     def get_batches_by_query(self,query, page_size, params=None):
         """Gets query by batches."""
-        self.__cursor.execute(query, params)
-        rows = self.__cursor.fetchmany(page_size)
-        while rows:
-            yield rows
-            rows = self.__cursor.fetchmany(page_size)
+        with self._get_cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchmany(page_size)
+            while rows:
+                yield rows
+                rows = cursor.fetchmany(page_size)
 
 
     def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True):
