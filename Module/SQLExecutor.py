@@ -4,6 +4,7 @@ import psycopg
 import configparser
 import csv
 import re
+import uuid
 from openpyxl import Workbook, load_workbook
 from Module.Helpers import Logger
 from Module.enums.file_types import FileType
@@ -49,7 +50,7 @@ class GeneralConnection:
     def close(self):
         raise NotImplementedError("Subclass must implement this method")
 
-    def get_cursor(self):
+    def get_cursor(self, is_server_cursor):
         raise NotImplementedError("Subclass must implement this method")
 
 # Abstract base class defining the general interface for all database cursors
@@ -103,10 +104,14 @@ class PostgresConnection(GeneralConnection):
             self.__connection.close()
             self.logger.info("PostgreSQL connection closed.")
 
-    def get_cursor(self):
+    def get_cursor(self, is_server_cursor):
         """Returns a generalized cursor object for PostgreSQL."""
         try:
-            return PostgresCursor(self.__connection.cursor())
+            if is_server_cursor:
+                # Always return a named cursor (server-side)
+                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}"))
+            else:
+                return PostgresCursor(self.__connection.cursor())
         except Exception as e:
             self.logger.error(f"Failed to create PostgreSQL cursor: {str(e)}")
             raise
@@ -185,7 +190,7 @@ class OracleConnection(GeneralConnection):
             self.__connection.close()
             self.logger.info("Oracle connection closed.")
 
-    def get_cursor(self):
+    def get_cursor(self, is_server_cursor):
         """Returns a generalized cursor object for Oracle."""
         try:
             return OracleCursor(self.__connection.cursor())
@@ -272,9 +277,9 @@ class SQLExecutor:
         """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
 
-    def _get_cursor(self):
+    def _get_cursor(self, is_server_cursor = True):
         """Returns a new cursor. Each method will call this to open a new cursor."""
-        return self.__db_connection.get_cursor()
+        return self.__db_connection.get_cursor(is_server_cursor)
 
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
         """Executes SQL queries from a file."""
@@ -282,6 +287,7 @@ class SQLExecutor:
             with open(file_name, 'r') as file:
                 queries = file.read().split(';')
 
+            # This is to append count to the file name according to the number of queries a file have. Like (001, 002, 003, ...).
             preceding_zeros = len(str(len(queries)))
 
             # Loop through each query in the file
