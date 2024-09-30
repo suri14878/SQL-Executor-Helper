@@ -115,7 +115,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Oracle-specific tables and data."""
         cls.logger.info("Setting up Oracle database...")
         try:
-            with db._get_cursor(is_server_cursor=False) as cursor:
+            with db._get_cursor() as cursor:
                 cursor.execute("""
                 BEGIN
                 EXECUTE IMMEDIATE 'DROP TABLE TestActors CASCADE CONSTRAINTS';
@@ -149,7 +149,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Postgres-specific tables and data."""
         cls.logger.info("Setting up Postgres database...")
         try:
-            with db._get_cursor(is_server_cursor=False) as cursor:
+            with db._get_cursor(is_client_cursor=True) as cursor:
                 cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE;")
                 cursor.execute("""
                     CREATE TABLE TestActors (
@@ -366,7 +366,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         cls.logger.info("Tearing down test environment...")
         for db_type, db in cls.databases.items():
             try:
-                with db._get_cursor(is_server_cursor=False) as cursor:
+                with db._get_cursor(is_client_cursor=True) if db_type == 'postgres' else db._get_cursor() as cursor:
                     if db_type == 'oracle':
                         cursor.execute("DROP TABLE TestActors CASCADE CONSTRAINTS")
                     elif db_type == 'postgres':

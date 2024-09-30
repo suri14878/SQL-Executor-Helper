@@ -50,9 +50,9 @@ class GeneralConnection:
     def close(self):
         raise NotImplementedError("Subclass must implement this method")
 
-    def get_cursor(self, is_server_cursor):
+    def get_cursor(self):
         raise NotImplementedError("Subclass must implement this method")
-
+    
 # Abstract base class defining the general interface for all database cursors
 class GeneralCursor:
     def execute(self, query, params=None):
@@ -104,14 +104,14 @@ class PostgresConnection(GeneralConnection):
             self.__connection.close()
             self.logger.info("PostgreSQL connection closed.")
 
-    def get_cursor(self, is_server_cursor):
-        """Returns a generalized cursor object for PostgreSQL."""
+    def get_cursor(self, is_client_cursor = False):
+        """Returns a generalized cursor object based on param for PostgreSQL."""
         try:
-            if is_server_cursor:
-                # Always return a named cursor (server-side)
-                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}"))
-            else:
+            if is_client_cursor:
+                # Always return a client cursor (client-side)
                 return PostgresCursor(self.__connection.cursor())
+            else:
+                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}"))
         except Exception as e:
             self.logger.error(f"Failed to create PostgreSQL cursor: {str(e)}")
             raise
@@ -190,7 +190,7 @@ class OracleConnection(GeneralConnection):
             self.__connection.close()
             self.logger.info("Oracle connection closed.")
 
-    def get_cursor(self, is_server_cursor):
+    def get_cursor(self):
         """Returns a generalized cursor object for Oracle."""
         try:
             return OracleCursor(self.__connection.cursor())
@@ -277,9 +277,14 @@ class SQLExecutor:
         """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
 
-    def _get_cursor(self, is_server_cursor = True):
-        """Returns a new cursor. Each method will call this to open a new cursor."""
-        return self.__db_connection.get_cursor(is_server_cursor)
+    def _get_cursor(self, is_client_cursor = None):
+        """Returns a new cursor. Each method will call this to open a new cursor."""    
+        if is_client_cursor:        
+            return self.__db_connection.get_cursor(is_client_cursor)
+        else:
+            return self.__db_connection.get_cursor()
+
+
 
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
         """Executes SQL queries from a file."""
