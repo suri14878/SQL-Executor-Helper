@@ -383,7 +383,7 @@ class SQLExecutor:
             return True, int(match.group(1))  # Return pagination flag and page size as an integer
         return False, None  # Return False if no pagination information is found
 
-    def get_batches_by_query(self,query, page_size, params=None):
+    def get_batches_by_query(self, query, page_size, params=None):
         """Gets query by batches."""
         with self._get_cursor() as cursor:
             cursor.execute(query, params)
@@ -392,6 +392,18 @@ class SQLExecutor:
                 yield rows
                 rows = cursor.fetchmany(page_size)
 
+    def get_queries_from_file(self, file_name):
+        """Returns the list of queries from the SQL file."""
+        with open(file_name, 'r') as file:
+            queries = file.read().split(';')
+        return [query.strip() for query in queries if query.strip()]
+    
+    def get_query_by_index(self, file_name, index):
+        """Returns a query by its index in the file."""
+        queries = self.get_queries_from_file(file_name)
+        if index < len(queries):
+            return queries[index]
+        return None
 
     def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True):
         """Appends these batches in specified file."""

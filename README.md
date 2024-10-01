@@ -73,3 +73,20 @@ Below are the steps to install and execute the SQL-Executor-Helper project:
       ```
 
     You can combine both comments for more control, and they will only apply to the query directly below them. The batch_size and row_limit parameters passed to the functions will not affect these queries.'
+
+## How to use it Programmatically
+
+1.  You can get queries by file:
+     ```bash
+      queries = db.get_queries_from_file('filename.sql')
+      ```
+2.  You can get query by index:
+      ```bash
+      queries = db.get_query_by_index('filename.sql', index=1)
+      ```
+3. You can get rows by batches and save them to specified file type:
+      ```bash
+      batches = oracle_db.get_batches_by_query(query, page_size=3)
+      for i, row in enumerate(batches):
+          oracle_db.save_to_csv(row, 'test', is_append= True if i!=0 else False, include_header=True if i==0 else False)
+      ```
