@@ -1,8 +1,8 @@
 import sys, os, importlib
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import Module.Helpers.Logger as Logger
-import Module.Helpers.DatabaseConfig as DatabaseConfig
-import Module.Helpers.TestConfig as TestConfig
+import Executor.Helpers.Logger as Logger
+import Executor.Helpers.DatabaseConfig as DatabaseConfig
+import Executor.Helpers.TestConfig as TestConfig
 # ClientServerConfigs = importlib.import_module("Modules.Generate Client and Server Configs")
 
 def CreateConfigs():

@@ -6,8 +6,8 @@ import csv
 import re
 import uuid
 from openpyxl import Workbook, load_workbook
-from Module.Helpers import Logger
-from Module.enums.file_types import FileType
+from Executor.Helpers import Logger
+from Executor.enums.file_types import FileType
 
 
 logging = Logger.create_logger()

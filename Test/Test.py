@@ -7,9 +7,9 @@ from openpyxl import load_workbook
 # Get the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
-from Module.Helpers import Logger
-from Module.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection
-from Module.enums.file_types import FileType
+from Executor.Helpers import Logger
+from Executor.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection
+from Executor.enums.file_types import FileType
 
 class TestSQLExecutorIntegration(unittest.TestCase):
 
