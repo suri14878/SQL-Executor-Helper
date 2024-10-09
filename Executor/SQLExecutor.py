@@ -302,8 +302,8 @@ class SQLExecutor:
                     continue
 
                 # Check if the query includes pagination (e.g., /* PAGINATE SIZE <number> */)
-                is_paginate, query_page_size = self.extract_pagination_info(query)
-                is_rowlimit, query_row_limit = self.extract_row_limit_info(query)
+                is_paginate, query_page_size = self.__extract_pagination_info(query)
+                is_rowlimit, query_row_limit = self.__extract_row_limit_info(query)
 
                 # Apply limit based of query comments or parameter
                 apply_limit = query_row_limit if is_rowlimit else row_limit
@@ -341,11 +341,11 @@ class SQLExecutor:
                         else:
                             rows = cursor.fetchall()
                         if result_file_type == FileType.CSV:
-                            self.save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                            self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
                         elif result_file_type == FileType.TXT:
-                            self.save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                            self.__save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
                         elif result_file_type == FileType.EXCEL:
-                            self.save_to_excel(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")
+                            self.__save_to_excel(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")
                         
         except FileNotFoundError as e:
             self.logger.error(f"SQL file not found: {file_name}")
@@ -369,14 +369,14 @@ class SQLExecutor:
                 # Execute each file and save the results
                 self.execute_file_and_save(file_path, f"{result_save_path}{os.path.splitext(file_name)[0]}", result_file_type, batch_size, row_limit)
 
-    def extract_pagination_info(self, query):
+    def __extract_pagination_info(self, query):
         """Extracts the pagination information from multiline comments using the pattern '/* PAGINATE SIZE <number> */'."""
         match = re.search(r'/\*\s*PAGINATE\s+SIZE\s+(\d+)\s*\*/', query, flags=re.IGNORECASE)
         if match:
             return True, int(match.group(1))  # Return pagination flag and page size as an integer
         return False, None  # Return False if no pagination information is found
     
-    def extract_row_limit_info(self, query):
+    def __extract_row_limit_info(self, query):
         """Extracts the row limit information from multiline comments using the pattern '/* ROW LIMIT <number> */'."""
         match = re.search(r'/\*\s*ROW\s+LIMIT\s+(\d+)\s*\*/', query, flags=re.IGNORECASE)
         if match:
@@ -391,30 +391,48 @@ class SQLExecutor:
             while rows:
                 yield rows
                 rows = cursor.fetchmany(page_size)
+    
+    def map_rows_to_objects(self, query, my_class, page_size, params=None):
+        objects = []
+        with self._get_cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchmany(page_size)
+            while rows:
+                for row in rows:
+                    object = my_class()
+                    for key, value in row.items():
+                        # Set only the attributes that are present in the row dictionary
+                        setattr(object, key, value)
+                    objects.append(object)
+                yield objects
+                rows = cursor.fetchmany(page_size)
 
-    def get_queries_from_file(self, file_name):
-        """Returns the list of queries from the SQL file."""
+
+    def get_queries_from_file(self, file_name, index=None):
+        """Returns all queries or a specific query by index from the SQL file."""
         with open(file_name, 'r') as file:
             queries = file.read().split(';')
-        return [query.strip() for query in queries if query.strip()]
-    
-    def get_query_by_index(self, file_name, index):
-        """Returns a query by its index in the file."""
-        queries = self.get_queries_from_file(file_name)
-        if index < len(queries):
-            return queries[index]
-        return None
+            queries = [query.strip() for query in queries if query.strip()]
 
+        if index is not None:
+            # Return the query at the specified index if it exists
+            if 0 <= index < len(queries):
+                return queries[index]
+            return None  # If the index is out of range, return None
+        else:
+            # Return all queries if no index is specified
+            return queries
+        
     def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True):
         """Appends these batches in specified file."""
         if result_file_type == FileType.CSV:
-            self.save_to_csv(data,result_file, is_append, include_header)    
+            self.__save_to_csv(data,result_file, is_append, include_header)    
         elif result_file_type == FileType.TXT:
-            self.save_to_txt(data,result_file, is_append, include_header)    
+            self.__save_to_txt(data,result_file, is_append, include_header)    
         elif result_file_type == FileType.EXCEL:
-            self.save_to_excel(data,result_file, is_append, include_header)   
+            self.__save_to_excel(data,result_file, is_append, include_header)   
 
-    def save_to_csv(self, data, file_name, is_append=False, include_header=True):
+    def __save_to_csv(self, data, file_name, is_append=False, include_header=True):
         """Saves data to a CSV file with column names."""
         try:
             if not data:  # Check if data is empty
@@ -438,7 +456,7 @@ class SQLExecutor:
             self.logger.error(f"Failed to save data to CSV: {str(e)}")
             raise
 
-    def save_to_txt(self, data, file_name, is_append=False, include_header=True):
+    def __save_to_txt(self, data, file_name, is_append=False, include_header=True):
         """Saves data to a TXT file with column names, using tab-separated values."""
         try:
             if not data:  # Check if data is empty
@@ -464,7 +482,7 @@ class SQLExecutor:
             self.logger.error(f"Failed to save data to TXT: {str(e)}")
             raise
 
-    def save_to_excel(self, data, file_name, is_append=False, include_header=True):
+    def __save_to_excel(self, data, file_name, is_append=False, include_header=True):
         """Saves data to an Excel file with column names."""
         try:
             if not data:  # Check if data is empty
