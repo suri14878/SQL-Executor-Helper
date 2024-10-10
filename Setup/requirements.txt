@@ -2,4 +2,4 @@ oracledb==2.4.1         # Used for connecting to oracle database
 configparser==7.1.0     # Used for reading config files
 psycopg[binary]==3.2.1  # Used for connecting to postgres database
 logging==0.4.9.6        # Used for logging
-openpyxl==3.15          # Used for working with excel files
+openpyxl==3.1.5          # Used for working with excel files

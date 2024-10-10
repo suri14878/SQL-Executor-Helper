@@ -2,7 +2,8 @@
 setlocal
 
 cd ..
-pip wheel .
+pip install setuptools wheel
+python setup.py sdist bdist_wheel
 cd batchScript
 
 echo Finished Packaging.
