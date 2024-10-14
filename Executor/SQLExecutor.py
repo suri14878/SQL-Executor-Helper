@@ -126,9 +126,6 @@ class PostgresConnection(GeneralConnection):
             self.logger.error(f"Failed to create PostgreSQL cursor: {str(e)}")
             raise
 
-    def transaction(self):
-        return Transaction(self)
-
 # Concrete class for PostgreSQL cursor
 class PostgresCursor(GeneralCursor):
     def __init__(self, cursor):
@@ -215,8 +212,6 @@ class OracleConnection(GeneralConnection):
         """It just commits!"""
         self.__connection.commit()
     
-    def transaction(self):
-        return Transaction(self)
 
 # Concrete class for Oracle cursor
 class OracleCursor(GeneralCursor):
@@ -318,6 +313,9 @@ class SQLExecutor:
             return self.__db_connection.get_cursor(is_client_cursor)
         else:
             return self.__db_connection.get_cursor()
+    
+    def transaction(self):
+        return Transaction(self.__db_connection)
 
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
         """Executes Select SQL queries from a file."""
@@ -404,10 +402,8 @@ class SQLExecutor:
 
     def execute_query(self, query, params=None):
         """Executes any SQL query (INSERT, DELETE, UPDATE, or others) with transaction management."""
-        with self.__db_connection.transaction():
-            with self.get_cursor(is_client_cursor=True) as cursor:
-                cursor.execute(query, params)
-                self.__db_connection.commit()  # Commit after executing each query
+        with self.get_cursor(is_client_cursor=True) as cursor:
+            cursor.execute(query, params)
 
     def execute_file(self, file_name):
         """Executes a series of SQL queries from a file, with each query separated by ';'."""
@@ -415,12 +411,9 @@ class SQLExecutor:
             with open(file_name, 'r') as file:
                 queries = file.read().split(';')
                 queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
-
-            with self.__db_connection.transaction():
                 for query in queries:
                     with self.get_cursor(is_client_cursor=True) as cursor:
                         cursor.execute(query)
-                self.__db_connection.commit()  # Commit once after all queries are executed
 
         except FileNotFoundError:
             self.logger.error(f"SQL file not found: {file_name}")
