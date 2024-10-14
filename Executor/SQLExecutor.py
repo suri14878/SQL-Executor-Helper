@@ -49,9 +49,15 @@ class GeneralConnection:
 
     def close(self):
         raise NotImplementedError("Subclass must implement this method")
+    
+    def commit(self):
+        raise NotImplementedError("Subclass must implement this method")
 
     def get_cursor(self):
         raise NotImplementedError("Subclass must implement this method")
+    
+    def transaction(self):
+        return Transaction(self)
     
 # Abstract base class defining the general interface for all database cursors
 class GeneralCursor:
@@ -104,6 +110,10 @@ class PostgresConnection(GeneralConnection):
             self.__connection.close()
             self.logger.info("PostgreSQL connection closed.")
 
+    def commit(self):
+        """It just commits!"""
+        self.__connection.commit()
+
     def get_cursor(self, is_client_cursor = False):
         """Returns a generalized cursor object based on param for PostgreSQL."""
         try:
@@ -115,6 +125,9 @@ class PostgresConnection(GeneralConnection):
         except Exception as e:
             self.logger.error(f"Failed to create PostgreSQL cursor: {str(e)}")
             raise
+
+    def transaction(self):
+        return Transaction(self)
 
 # Concrete class for PostgreSQL cursor
 class PostgresCursor(GeneralCursor):
@@ -197,6 +210,13 @@ class OracleConnection(GeneralConnection):
         except Exception as e:
             self.logger.error(f"Failed to create Oracle cursor: {str(e)}")
             raise
+    
+    def commit(self):
+        """It just commits!"""
+        self.__connection.commit()
+    
+    def transaction(self):
+        return Transaction(self)
 
 # Concrete class for Oracle cursor
 class OracleCursor(GeneralCursor):
@@ -265,6 +285,21 @@ class OracleCursor(GeneralCursor):
         # Set rowfactory to map unique column names to values
         self.__cursor.rowfactory = lambda *args: dict(zip(unique_columns, args))
 
+# Transaction context manager
+class Transaction:
+    def __init__(self, connection):
+        self.connection = connection
+        self.success = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self.connection.commit()
+        else:
+            self.connection.rollback()
+            self.connection.logger.error("Transaction rolled back due to an error.")
 
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
@@ -277,17 +312,15 @@ class SQLExecutor:
         """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
 
-    def _get_cursor(self, is_client_cursor = None):
+    def get_cursor(self, is_client_cursor = None):
         """Returns a new cursor. Each method will call this to open a new cursor."""    
         if is_client_cursor:        
             return self.__db_connection.get_cursor(is_client_cursor)
         else:
             return self.__db_connection.get_cursor()
 
-
-
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
-        """Executes SQL queries from a file."""
+        """Executes Select SQL queries from a file."""
         try:
             with open(file_name, 'r') as file:
                 queries = file.read().split(';')
@@ -333,7 +366,7 @@ class SQLExecutor:
                         if apply_limit and rows_fetched >= apply_limit:
                             break
                 else:
-                    with self._get_cursor() as cursor:
+                    with self.get_cursor() as cursor:
                         cursor.execute(query)
                         # Fetch all rows at once if no batch size specified
                         if apply_limit:
@@ -355,7 +388,7 @@ class SQLExecutor:
             raise
 
     def execute_folder_and_save(self,folder_path, result_save_path, result_file_type, batch_size=None, row_limit=None):
-        """Executes SQL files from a folder and saves the results."""
+        """Executes Select SQL files from a folder and saves the results."""
         
         # Check if the provided path is a valid directory
         if not os.path.isdir(folder_path):
@@ -368,6 +401,33 @@ class SQLExecutor:
             if os.path.isfile(file_path):
                 # Execute each file and save the results
                 self.execute_file_and_save(file_path, f"{result_save_path}{os.path.splitext(file_name)[0]}", result_file_type, batch_size, row_limit)
+
+    def execute_query(self, query, params=None):
+        """Executes any SQL query (INSERT, DELETE, UPDATE, or others) with transaction management."""
+        with self.__db_connection.transaction():
+            with self.get_cursor(is_client_cursor=True) as cursor:
+                cursor.execute(query, params)
+                self.__db_connection.commit()  # Commit after executing each query
+
+    def execute_file(self, file_name):
+        """Executes a series of SQL queries from a file, with each query separated by ';'."""
+        try:
+            with open(file_name, 'r') as file:
+                queries = file.read().split(';')
+                queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
+
+            with self.__db_connection.transaction():
+                for query in queries:
+                    with self.get_cursor(is_client_cursor=True) as cursor:
+                        cursor.execute(query)
+                self.__db_connection.commit()  # Commit once after all queries are executed
+
+        except FileNotFoundError:
+            self.logger.error(f"SQL file not found: {file_name}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to execute SQL file: {str(e)}")
+            raise
 
     def __extract_pagination_info(self, query):
         """Extracts the pagination information from multiline comments using the pattern '/* PAGINATE SIZE <number> */'."""
@@ -385,7 +445,7 @@ class SQLExecutor:
 
     def get_batches_by_query(self, query, page_size, params=None):
         """Gets query by batches."""
-        with self._get_cursor() as cursor:
+        with self.get_cursor() as cursor:
             cursor.execute(query, params)
             rows = cursor.fetchmany(page_size)
             while rows:
@@ -394,7 +454,7 @@ class SQLExecutor:
     
     def map_rows_to_objects(self, query, my_class, page_size, params=None):
         objects = []
-        with self._get_cursor() as cursor:
+        with self.get_cursor() as cursor:
             cursor.execute(query, params)
             rows = cursor.fetchmany(page_size)
             while rows:
