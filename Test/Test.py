@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 # Get the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
-from Executor.Helpers import Logger
+import Logger
 from Executor.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection
 from Executor.enums.file_types import FileType
 
@@ -21,7 +21,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         config = cls.load_config()
 
         # Create Logger
-        logging = Logger.create_logger()
+        logging = Logger.create_root()
         cls.logger = logging.getLogger('Tester')
         cls.logger.info("Setting up the databases and test environment...")
 
@@ -115,8 +115,8 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Oracle-specific tables and data."""
         cls.logger.info("Setting up Oracle database...")
         try:
-            with db.get_cursor() as cursor:
-                cursor.execute("""
+            with db.transaction():
+                db.execute_query("""
                 BEGIN
                 EXECUTE IMMEDIATE 'DROP TABLE TestActors CASCADE CONSTRAINTS';
                 EXCEPTION
@@ -126,7 +126,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     END IF;
                 END;
                 """)
-                cursor.execute("""
+                db.execute_query("""
                     CREATE TABLE TestActors (
                         PK_ID INTEGER PRIMARY KEY,
                         NAME VARCHAR(100),
@@ -134,13 +134,13 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                         BIO VARCHAR(1000)
                     )
                 """)
+            with db.transaction():
                 for i in range(1, 11):
-                    cursor.execute(f"""
+                    db.execute_query(f"""
                         INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
                         VALUES ({i}, 'Actor {i}', 'Male', 'Bio of Actor {i}')
                     """)
-                cursor.execute("COMMIT")
-                cls.logger.info("Oracle database setup completed.")
+            cls.logger.info("Oracle database setup completed.")
         except Exception as e:
             cls.logger.error(f"Error setting up Oracle database: {e}")
 
@@ -149,9 +149,9 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Postgres-specific tables and data."""
         cls.logger.info("Setting up Postgres database...")
         try:
-            with db.get_cursor(is_client_cursor=True) as cursor:
-                cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE;")
-                cursor.execute("""
+            with db.transaction():
+                db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE;")
+                db.execute_query("""
                     CREATE TABLE TestActors (
                         "PK_ID" SERIAL PRIMARY KEY,
                         "NAME" VARCHAR(100),
@@ -159,12 +159,13 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                         "BIO" TEXT
                     )
                 """)
+
+            with db.transaction():
                 for i in range(1, 11):
-                    cursor.execute(f"""
+                    db.execute_query(f"""
                         INSERT INTO TestActors ("NAME", "SEX", "BIO")
                         VALUES ('Actor {i}', 'Male', 'Bio of Actor {i}')
                     """)
-                cursor.execute("COMMIT")
                 cls.logger.info("Postgres database setup completed.")
         except Exception as e:
             cls.logger.error(f"Error setting up Postgres database: {e}")
@@ -366,12 +367,11 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         cls.logger.info("Tearing down test environment...")
         for db_type, db in cls.databases.items():
             try:
-                with db.get_cursor(is_client_cursor=True) if db_type == 'postgres' else db.get_cursor() as cursor:
+                with db.transaction():
                     if db_type == 'oracle':
-                        cursor.execute("DROP TABLE TestActors CASCADE CONSTRAINTS")
+                        db.execute_query("DROP TABLE TestActors CASCADE CONSTRAINTS")
                     elif db_type == 'postgres':
-                        cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE")
-                    cursor.execute("COMMIT")
+                        db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE")
                     cls.logger.info(f"{db_type} test table dropped.")
             except Exception as e:
                 cls.logger.error(f"Error dropping {db_type} table: {e}")

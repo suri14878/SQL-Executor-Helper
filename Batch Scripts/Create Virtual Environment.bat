@@ -28,8 +28,8 @@ rem Install dependencies into environment
 echo Attempting to install dependencies to virtual enviornment...
 cd %VENV_NAME%/Scripts 
 call activate.bat 
-cd ../../Setup
-python -m pip install -r requirements.txt
+cd ../../
+python -m pip install -r Setup/requirements.txt
 echo Finished installing dependencies. & echo Completed set-up process. 
 
 pause

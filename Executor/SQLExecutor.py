@@ -6,11 +6,11 @@ import csv
 import re
 import uuid
 from openpyxl import Workbook, load_workbook
-from Executor.Helpers import Logger
 from Executor.enums.file_types import FileType
 
 
-logging = Logger.create_logger()
+import Logger
+logging = Logger.create_root()
 
 class UniqueDictRowFactory:
     def __init__(self, cursor: psycopg.Cursor):
@@ -200,7 +200,7 @@ class OracleConnection(GeneralConnection):
             self.__connection.close()
             self.logger.info("Oracle connection closed.")
 
-    def get_cursor(self):
+    def get_cursor(self, is_client_cursor = False):
         """Returns a generalized cursor object for Oracle."""
         try:
             return OracleCursor(self.__connection.cursor())
@@ -307,7 +307,7 @@ class SQLExecutor:
         """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
 
-    def get_cursor(self, is_client_cursor = None):
+    def __get_cursor(self, is_client_cursor = None):
         """Returns a new cursor. Each method will call this to open a new cursor."""    
         if is_client_cursor:        
             return self.__db_connection.get_cursor(is_client_cursor)
@@ -364,7 +364,7 @@ class SQLExecutor:
                         if apply_limit and rows_fetched >= apply_limit:
                             break
                 else:
-                    with self.get_cursor() as cursor:
+                    with self.__get_cursor() as cursor:
                         cursor.execute(query)
                         # Fetch all rows at once if no batch size specified
                         if apply_limit:
@@ -402,7 +402,7 @@ class SQLExecutor:
 
     def execute_query(self, query, params=None):
         """Executes any SQL query (INSERT, DELETE, UPDATE, or others) with transaction management."""
-        with self.get_cursor(is_client_cursor=True) as cursor:
+        with self.__get_cursor(is_client_cursor=True) as cursor:
             cursor.execute(query, params)
 
     def execute_file(self, file_name):
@@ -412,7 +412,7 @@ class SQLExecutor:
                 queries = file.read().split(';')
                 queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
                 for query in queries:
-                    with self.get_cursor(is_client_cursor=True) as cursor:
+                    with self.__get_cursor(is_client_cursor=True) as cursor:
                         cursor.execute(query)
 
         except FileNotFoundError:
@@ -438,7 +438,7 @@ class SQLExecutor:
 
     def get_batches_by_query(self, query, page_size, params=None):
         """Gets query by batches."""
-        with self.get_cursor() as cursor:
+        with self.__get_cursor() as cursor:
             cursor.execute(query, params)
             rows = cursor.fetchmany(page_size)
             while rows:
@@ -447,7 +447,7 @@ class SQLExecutor:
     
     def map_rows_to_objects(self, query, my_class, page_size, params=None):
         objects = []
-        with self.get_cursor() as cursor:
+        with self.__get_cursor() as cursor:
             cursor.execute(query, params)
             rows = cursor.fetchmany(page_size)
             while rows:
