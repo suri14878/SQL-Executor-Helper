@@ -1,14 +1,12 @@
 import sys, os, importlib
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import Logger
-import Executor.Helpers.LoggerConfig as LoggerConfig
 import Executor.Helpers.DatabaseConfig as DatabaseConfig
 import Executor.Helpers.TestConfig as TestConfig
 # ClientServerConfigs = importlib.import_module("Modules.Generate Client and Server Configs")
 
 def CreateConfigs():
     try:
-        LoggerConfig.CreateLoggerConfig()
         logging = Logger.create_root()
         logger = logging.getLogger("Create Configs")
         DatabaseConfig.CreateDatabaseConfig()

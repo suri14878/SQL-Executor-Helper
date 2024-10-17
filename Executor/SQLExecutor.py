@@ -9,8 +9,7 @@ from openpyxl import Workbook, load_workbook
 from Executor.enums.file_types import FileType
 
 
-import Logger
-logging = Logger.create_root()
+import logging
 
 class UniqueDictRowFactory:
     def __init__(self, cursor: psycopg.Cursor):
@@ -114,6 +113,11 @@ class PostgresConnection(GeneralConnection):
         """It just commits!"""
         self.__connection.commit()
 
+    def rollback(self):
+        """Rolls back the transaction."""
+        if self.__connection:
+            self.__connection.rollback()
+
     def get_cursor(self, is_client_cursor = False):
         """Returns a generalized cursor object based on param for PostgreSQL."""
         try:
@@ -211,6 +215,11 @@ class OracleConnection(GeneralConnection):
     def commit(self):
         """It just commits!"""
         self.__connection.commit()
+
+    def rollback(self):
+        """Rolls back the transaction."""
+        if self.__connection:
+            self.__connection.rollback()
     
 
 # Concrete class for Oracle cursor
@@ -294,7 +303,7 @@ class Transaction:
             self.connection.commit()
         else:
             self.connection.rollback()
-            self.connection.logger.error("Transaction rolled back due to an error.")
+            self.connection.logger.warning("Transaction rolled back due to an error.")
 
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
@@ -364,20 +373,26 @@ class SQLExecutor:
                         if apply_limit and rows_fetched >= apply_limit:
                             break
                 else:
-                    with self.__get_cursor() as cursor:
-                        cursor.execute(query)
-                        # Fetch all rows at once if no batch size specified
-                        if apply_limit:
-                            rows = cursor.fetchmany(apply_limit)
-                        else:
-                            rows = cursor.fetchall()
-                        if result_file_type == FileType.CSV:
-                            self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
-                        elif result_file_type == FileType.TXT:
-                            self.__save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
-                        elif result_file_type == FileType.EXCEL:
-                            self.__save_to_excel(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")
-                        
+                    try:
+                        with self.__get_cursor() as cursor:
+                            cursor.execute(query)
+                            # Fetch all rows at once if no batch size specified
+                            if apply_limit:
+                                rows = cursor.fetchmany(apply_limit)
+                            else:
+                                rows = cursor.fetchall()
+                            if result_file_type == FileType.CSV:
+                                self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                            elif result_file_type == FileType.TXT:
+                                self.__save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                            elif result_file_type == FileType.EXCEL:
+                                self.__save_to_excel(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to execute and save results for query in file '{file_name}': {e}")
+                        raise
+                    finally:
+                        self.__db_connection.commit()
+                            
         except FileNotFoundError as e:
             self.logger.error(f"SQL file not found: {file_name}")
             raise
@@ -438,12 +453,22 @@ class SQLExecutor:
 
     def get_batches_by_query(self, query, page_size, params=None):
         """Gets query by batches."""
-        with self.__get_cursor() as cursor:
-            cursor.execute(query, params)
-            rows = cursor.fetchmany(page_size)
-            while rows:
-                yield rows
+        try:
+
+            with self.__get_cursor() as cursor:
+                cursor.execute(query, params)
                 rows = cursor.fetchmany(page_size)
+                while rows:
+                    yield rows
+                    rows = cursor.fetchmany(page_size)
+        except Exception as e:
+            # Rollback if an error occurs
+            self.logger.error(f"Error fetching batches: {e}")
+            raise
+
+        finally:
+                self.__db_connection.commit()
+
     
     def map_rows_to_objects(self, query, my_class, page_size, params=None):
         objects = []

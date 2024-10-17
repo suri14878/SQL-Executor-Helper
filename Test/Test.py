@@ -1,3 +1,4 @@
+import itertools
 import unittest
 import os,sys, shutil
 import csv
@@ -134,7 +135,6 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                         BIO VARCHAR(1000)
                     )
                 """)
-            with db.transaction():
                 for i in range(1, 11):
                     db.execute_query(f"""
                         INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
@@ -160,7 +160,6 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     )
                 """)
 
-            with db.transaction():
                 for i in range(1, 11):
                     db.execute_query(f"""
                         INSERT INTO TestActors ("NAME", "SEX", "BIO")
@@ -271,6 +270,41 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                 except Exception as e:
                     self.logger.error(f"Error in folder query test for {db_type}: {e}")
                     raise
+
+    def test_transaction_rollback_on_error(self):
+        """Test that a transaction rolls back on error, specifically on a division by zero error."""
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                self.logger.info(f"Running transaction rollback test for {db_type} database.")
+                
+                try:
+                    # Start a transaction
+                    with db.transaction():
+                        # Insert a test row that should be rolled back
+
+                        # Cause a division by zero error to trigger rollback
+                        if db_type == 'postgres':
+                            db.execute_query("INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES (999, 'Actor 999', 'Male', 'Should be rolled back')")
+                            db.execute_query("SELECT 1/0 AS db_exception")
+                        elif db_type == 'oracle':
+                            db.execute_query("INSERT INTO TestActors (PK_ID, NAME, SEX, BIO) VALUES (999, 'Actor 999', 'Male', 'Should be rolled back')")
+                            db.execute_query("SELECT 1/0 AS db_exception FROM dual")
+
+                    # If no exception was raised, fail the test
+                    self.fail(f"Expected division by zero exception in {db_type} did not occur.")
+
+                except Exception as e:
+                    # Expected error occurred, check rollback
+                    self.logger.info(f"Division by zero error occurred as expected in {db_type}: {e}")
+
+                    # Now check that the insert was rolled back
+                    batches = db.get_batches_by_query("SELECT * FROM TestActors WHERE \"PK_ID\" = 999", page_size = 1)
+                    rows = [row for row in itertools.chain.from_iterable(batches)]
+                    self.assertEqual(len(rows), 0, f"Transaction did not roll back in {db_type}; found row with PK_ID 999.")
+
+                else:
+                    # If no exception was caught, this means the transaction did not rollback as expected
+                    self.fail(f"Transaction did not roll back in {db_type} as expected on division by zero.")
 
     def verify_multiQuery_files(self, db_type, list_data, file_name):
         """Helper method to save multiquery data and verify CSV, TXT, Excel files."""
