@@ -7,9 +7,43 @@ import re
 import uuid
 from openpyxl import Workbook, load_workbook
 from Executor.enums.file_types import FileType
-
-
 import logging
+import time
+import math
+
+# Retry decorator with exponential backoff
+def retry(tries, delay=3, backoff=2, exceptions=(Exception,)):
+    """
+    Retry calling the decorated function using an exponential backoff.
+
+    :param tries: Number of attempts to try (not retry) before giving up.
+    :param delay: Initial delay between attempts in seconds.
+    :param backoff: Multiplier applied to the delay after each retry.
+    :param exceptions: Exceptions to catch and trigger retry.
+    :raises: Last exception encountered.
+    """
+    if backoff <= 1:
+        raise ValueError("backoff must be greater than 1")
+    if tries < 0:
+        raise ValueError("tries must be 0 or greater")
+    if delay <= 0:
+        raise ValueError("delay must be greater than 0")
+
+    def deco_retry(f):
+        def f_retry(*args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 0:
+                try:
+                    return f(*args, **kwargs)
+                except exceptions as e:
+                    print(f"Retrying due to {e} (Remaining attempts: {mtries-1})...")
+                    mtries -= 1
+                    if mtries == 0:
+                        raise  # If out of tries, raise the last exception
+                    time.sleep(mdelay)
+                    mdelay *= backoff
+        return f_retry
+    return deco_retry
 
 class UniqueDictRowFactory:
     def __init__(self, cursor: psycopg.Cursor):
@@ -102,6 +136,17 @@ class PostgresConnection(GeneralConnection):
         except (psycopg.OperationalError, configparser.Error) as e:
             self.logger.error(f"Failed to connect to PostgreSQL: {str(e)}")
             raise
+
+    def is_closed(self):
+        """Check if the PostgreSQL connection is closed."""
+        if self.__connection is None:
+            return True
+        try:
+            # Check the connection status by executing a simple query
+            self.__connection.cursor().execute('SELECT 1')
+        except (psycopg.OperationalError, psycopg.InterfaceError):
+            return True
+        return False
 
     def close(self):
         """Closes the PostgreSQL database connection."""
@@ -197,6 +242,18 @@ class OracleConnection(GeneralConnection):
         except (oracledb.DatabaseError, configparser.Error) as e:
             self.logger.error(f"Failed to connect to Oracle: {str(e)}")
             raise
+
+    def is_closed(self):
+        """Check if the Oracle connection is closed."""
+        if self.__connection is None:
+            return True
+        try:
+            # Check the connection status by executing a simple query
+            self.__connection.cursor().execute('SELECT 1 FROM dual')
+        except (oracledb.DatabaseError, oracledb.InterfaceError):
+            return True
+        return False
+
 
     def close(self):
         """Closes the Oracle database connection."""
@@ -310,6 +367,8 @@ class SQLExecutor:
     def __init__(self, db_connection: GeneralConnection, config_file='config.ini', environment='test'):
         self.logger = logging.getLogger("Executor")
         self.__db_connection = db_connection
+        self.__config_file = config_file
+        self.__environment = environment
         self.__db_connection.connect(config_file, environment)
 
     def __del__(self):
@@ -326,72 +385,79 @@ class SQLExecutor:
     def transaction(self):
         return Transaction(self.__db_connection)
 
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
         """Executes Select SQL queries from a file."""
         try:
-            with open(file_name, 'r') as file:
-                queries = file.read().split(';')
+            # Check if the connection is None or has been closed
+            if self.__db_connection is None or self.__db_connection.is_closed():
+                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.__db_connection.connect(self.__config_file, self.__environment)
+            else:
 
-            # This is to append count to the file name according to the number of queries a file have. Like (001, 002, 003, ...).
-            preceding_zeros = len(str(len(queries)))
+                with open(file_name, 'r') as file:
+                    queries = file.read().split(';')
 
-            # Loop through each query in the file
-            for i,query in enumerate(queries):
-                query = query.strip()
-                if not query:  # Skip empty queries
-                    continue
+                # This is to append count to the file name according to the number of queries a file have. Like (001, 002, 003, ...).
+                preceding_zeros = len(str(len(queries)))
 
-                # Check if the query includes pagination (e.g., /* PAGINATE SIZE <number> */)
-                is_paginate, query_page_size = self.__extract_pagination_info(query)
-                is_rowlimit, query_row_limit = self.__extract_row_limit_info(query)
+                # Loop through each query in the file
+                for i,query in enumerate(queries):
+                    query = query.strip()
+                    if not query:  # Skip empty queries
+                        continue
 
-                # Apply limit based of query comments or parameter
-                apply_limit = query_row_limit if is_rowlimit else row_limit
+                    # Check if the query includes pagination (e.g., /* PAGINATE SIZE <number> */)
+                    is_paginate, query_page_size = self.__extract_pagination_info(query)
+                    is_rowlimit, query_row_limit = self.__extract_row_limit_info(query)
 
-                # Apply batch_size based of query comments or parameter
-                apply_batch_size = query_page_size if is_paginate else batch_size
+                    # Apply limit based of query comments or parameter
+                    apply_limit = query_row_limit if is_rowlimit else row_limit
 
-                if (apply_batch_size and apply_batch_size <= 0) or (apply_limit and apply_limit <= 0):
-                    self.logger.warning(f"No data has been fetched since batch size or row limit is zero or lesser for query number {i+1} and filename: {file_name}")
-                    continue
+                    # Apply batch_size based of query comments or parameter
+                    apply_batch_size = query_page_size if is_paginate else batch_size
 
-                # Handle queries with batch sizes (including 1)
-                if apply_batch_size:
-                    # Fetch rows in specified batch sizes
-                    rows_fetched = 0
-                    batches = self.get_batches_by_query(query, apply_batch_size)
-                    batch_index = 0 
-                    for batch in batches:
-                        # This logic will check that batch_size should be within the row limits.
-                        if apply_limit:
-                            remaining_rows = apply_limit - rows_fetched
-                            if remaining_rows < apply_batch_size:
-                                batch = batch[:remaining_rows]
-                        self.save_results(batch, f"{result_file_path}_{str(i + 1).zfill(preceding_zeros)}", result_file_type, is_append=True, include_header=True if batch_index==0 else False)
-                        rows_fetched += len(batch)
-                        batch_index += 1
-                        if apply_limit and rows_fetched >= apply_limit:
-                            break
-                else:
-                    try:
-                        with self.__get_cursor() as cursor:
-                            cursor.execute(query)
-                            # Fetch all rows at once if no batch size specified
+                    if (apply_batch_size and apply_batch_size <= 0) or (apply_limit and apply_limit <= 0):
+                        self.logger.warning(f"No data has been fetched since batch size or row limit is zero or lesser for query number {i+1} and filename: {file_name}")
+                        continue
+
+                    # Handle queries with batch sizes (including 1)
+                    if apply_batch_size:
+                        # Fetch rows in specified batch sizes
+                        rows_fetched = 0
+                        batches = self.get_batches_by_query(query, apply_batch_size)
+                        batch_index = 0 
+                        for batch in batches:
+                            # This logic will check that batch_size should be within the row limits.
                             if apply_limit:
-                                rows = cursor.fetchmany(apply_limit)
-                            else:
-                                rows = cursor.fetchall()
-                            if result_file_type == FileType.CSV:
-                                self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
-                            elif result_file_type == FileType.TXT:
-                                self.__save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
-                            elif result_file_type == FileType.EXCEL:
-                                self.__save_to_excel(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to execute and save results for query in file '{file_name}': {e}")
-                        raise
-                    finally:
-                        self.__db_connection.commit()
+                                remaining_rows = apply_limit - rows_fetched
+                                if remaining_rows < apply_batch_size:
+                                    batch = batch[:remaining_rows]
+                            self.save_results(batch, f"{result_file_path}_{str(i + 1).zfill(preceding_zeros)}", result_file_type, is_append=True, include_header=True if batch_index==0 else False)
+                            rows_fetched += len(batch)
+                            batch_index += 1
+                            if apply_limit and rows_fetched >= apply_limit:
+                                break
+                    else:
+                        try:
+                            with self.__get_cursor() as cursor:
+                                cursor.execute(query)
+                                # Fetch all rows at once if no batch size specified
+                                if apply_limit:
+                                    rows = cursor.fetchmany(apply_limit)
+                                else:
+                                    rows = cursor.fetchall()
+                                if result_file_type == FileType.CSV:
+                                    self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                                elif result_file_type == FileType.TXT:
+                                    self.__save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                                elif result_file_type == FileType.EXCEL:
+                                    self.__save_to_excel(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to execute and save results for query in file '{file_name}': {e}")
+                            raise
+                        finally:
+                            self.__db_connection.commit()
                             
         except FileNotFoundError as e:
             self.logger.error(f"SQL file not found: {file_name}")
@@ -400,35 +466,53 @@ class SQLExecutor:
             self.logger.error(f"Failed to execute SQL file: {str(e)}")
             raise
 
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def execute_folder_and_save(self,folder_path, result_save_path, result_file_type, batch_size=None, row_limit=None):
         """Executes Select SQL files from a folder and saves the results."""
-        
-        # Check if the provided path is a valid directory
-        if not os.path.isdir(folder_path):
-            self.logger.error(f"The provided path '{folder_path}' is not a valid directory.")
-            return
 
-        # Loop through all files in the folder
-        for file_name in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, file_name)
-            if os.path.isfile(file_path):
-                # Execute each file and save the results
-                self.execute_file_and_save(file_path, f"{result_save_path}{os.path.splitext(file_name)[0]}", result_file_type, batch_size, row_limit)
+        # Check if the connection is None or has been closed
+        if self.__db_connection is None or self.__db_connection.is_closed():
+            self.logger.info("Database connection is not active, attempting to reconnect.")
+            self.__db_connection.connect(self.__config_file, self.__environment)
+        else:
+            # Check if the provided path is a valid directory
+            if not os.path.isdir(folder_path):
+                self.logger.error(f"The provided path '{folder_path}' is not a valid directory.")
+                return
 
+            # Loop through all files in the folder
+            for file_name in os.listdir(folder_path):
+                file_path = os.path.join(folder_path, file_name)
+                if os.path.isfile(file_path):
+                    # Execute each file and save the results
+                    self.execute_file_and_save(file_path, f"{result_save_path}{os.path.splitext(file_name)[0]}", result_file_type, batch_size, row_limit)
+
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def execute_query(self, query, params=None):
         """Executes any SQL query (INSERT, DELETE, UPDATE, or others) with transaction management."""
-        with self.__get_cursor(is_client_cursor=True) as cursor:
-            cursor.execute(query, params)
+        # Check if the connection is None or has been closed
+        if self.__db_connection is None or self.__db_connection.is_closed():
+            self.logger.info("Database connection is not active, attempting to reconnect.")
+            self.__db_connection.connect(self.__config_file, self.__environment)
+        else:
+            with self.__get_cursor(is_client_cursor=True) as cursor:
+                cursor.execute(query, params)
 
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def execute_file(self, file_name):
         """Executes a series of SQL queries from a file, with each query separated by ';'."""
         try:
-            with open(file_name, 'r') as file:
-                queries = file.read().split(';')
-                queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
-                for query in queries:
-                    with self.__get_cursor(is_client_cursor=True) as cursor:
-                        cursor.execute(query)
+            # Check if the connection is None or has been closed
+            if self.__db_connection is None or self.__db_connection.is_closed():
+                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.__db_connection.connect(self.__config_file, self.__environment)
+            else:
+                with open(file_name, 'r') as file:
+                    queries = file.read().split(';')
+                    queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
+                    for query in queries:
+                        with self.__get_cursor(is_client_cursor=True) as cursor:
+                            cursor.execute(query)
 
         except FileNotFoundError:
             self.logger.error(f"SQL file not found: {file_name}")
@@ -451,16 +535,21 @@ class SQLExecutor:
             return True, int(match.group(1))  # Return pagination flag and page size as an integer
         return False, None  # Return False if no pagination information is found
 
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def get_batches_by_query(self, query, page_size, params=None):
         """Gets query by batches."""
         try:
-
-            with self.__get_cursor() as cursor:
-                cursor.execute(query, params)
-                rows = cursor.fetchmany(page_size)
-                while rows:
-                    yield rows
+            # Check if the connection is None or has been closed
+            if self.__db_connection is None or self.__db_connection.is_closed():
+                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.__db_connection.connect(self.__config_file, self.__environment)
+            else:
+                with self.__get_cursor() as cursor:
+                    cursor.execute(query, params)
                     rows = cursor.fetchmany(page_size)
+                    while rows:
+                        yield rows
+                        rows = cursor.fetchmany(page_size)
         except Exception as e:
             # Rollback if an error occurs
             self.logger.error(f"Error fetching batches: {e}")
@@ -469,21 +558,29 @@ class SQLExecutor:
         finally:
                 self.__db_connection.commit()
 
-    
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def map_rows_to_objects(self, query, my_class, page_size, params=None):
-        objects = []
-        with self.__get_cursor() as cursor:
-            cursor.execute(query, params)
-            rows = cursor.fetchmany(page_size)
-            while rows:
-                for row in rows:
-                    object = my_class()
-                    for key, value in row.items():
-                        # Set only the attributes that are present in the row dictionary
-                        setattr(object, key, value)
-                    objects.append(object)
-                yield objects
+        # Check if the connection is None or has been closed
+        if self.__db_connection is None or self.__db_connection.is_closed():
+            self.logger.info("Database connection is not active, attempting to reconnect.")
+            self.__db_connection.connect(self.__config_file, self.__environment)
+        else:
+            objects = []
+            with self.__get_cursor() as cursor:
+                cursor.execute(query, params)
                 rows = cursor.fetchmany(page_size)
+                while rows:
+                    for row in rows:
+                        object = my_class()
+                        for key, value in row.items():
+                            # Set only the attributes that are present in the row dictionary
+                            setattr(object, key, value)
+                        objects.append(object)
+                    yield objects
+                    rows = cursor.fetchmany(page_size)
+
+    def close(self):
+        self.__db_connection.close()
 
 
     def get_queries_from_file(self, file_name, index=None):

@@ -128,3 +128,16 @@ These will use server-side cursors to fetch the results, By default oracle has s
            print(instance.lifecycle_stage)
    ```
 ### Here is how you can use Data Manipulation Language (DML) commands
+For all DML commands you may open transaction by calling a method in Executor class and it will automatically commits at the end and if something goes wrong it will rollback the queries. Below is the usage of it.
+
+```bash
+# This function just executes all the queries from the file.
+with db.transaction():
+    db.execute_file('InsertQueriesFile.sql')
+
+# This function just takes query and execute.
+with postgres_db.transaction():
+    db.execute_query('''INSERT INTO Table_Name(val, val, val, val)
+	VALUES ('val', 'val', 'val', 'val');''')
+```
+**Note:** Both the functions are not for fetching.
