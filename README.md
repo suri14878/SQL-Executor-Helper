@@ -128,16 +128,33 @@ These will use server-side cursors to fetch the results, By default oracle has s
            print(instance.lifecycle_stage)
    ```
 ### Here is how you can use Data Manipulation Language (DML) commands
-For all DML commands you may open transaction by calling a method in Executor class and it will automatically commits at the end and if something goes wrong it will rollback the queries. Below is the usage of it.
 
 ```bash
-# This function just executes all the queries from the file.
-with db.transaction():
-    db.execute_file('InsertQueriesFile.sql')
+@retry_transaction()
+def insert_queries(db, config_file, environment):
+    with db.transaction():
+    	# This function just executes all the queries from the file.
+        db.execute_file('InsertQueriesFile.sql')
 
-# This function just takes query and execute.
-with postgres_db.transaction():
-    db.execute_query('''INSERT INTO Table_Name(val, val, val, val)
-	VALUES ('val', 'val', 'val', 'val');''')
+    with db.transaction():
+    	# This function just takes query and execute
+        db.execute_query('''INSERT INTO SAMPLE_TABLE(Name, Age, Dob, Bio)
+        VALUES (val1, val2, val3, val4);''')
+        db.execute_query('''INSERT INTO SAMPLE_TABLE(Name, Age, Dob, Bio)
+        VALUES (val1, val2, val3, val4);''')
+        db.execute_query('''INSERT INTO SAMPLE_TABLE(Name, Age, Dob, Bio)
+        VALUES (val1, val2, val3, val4);''')
+        db.execute_query('''INSERT INTO SAMPLE_TABLE(Name, Age, Dob, Bio)
+        VALUES (val1, val2, val3, val4);''')
+        
+insert_queries()
 ```
 **Note:** Both the functions are not for fetching.
+
+1. In the above example, all the `INSERT` queries are wrapped within the `with db.transaction()` block, which acts as a context manager. This ensures that all changes are committed at the end of the block, and any error triggers an automatic rollback.
+2. To handle database connection failures, you can use the `@retry_transaction()` decorator from SQL Executor. This decorator will automatically retry the database connection if it fails and re-execute the `insert_queries` function. For this to work, the `insert_queries` function must accept `config_file` and `environment` as parameters.
+3. Additionally, you can pass custom parameters to `@retry_transaction()`, such as:
+   * `tries:` The number of attempts before giving up.
+   * `delay:` The initial delay between attempts, in seconds.
+   * `backoff:` A multiplier that increases the delay after each retry.  
+**For example:** `@retry_transaction(tries=3, delay=3, backoff=2)`.

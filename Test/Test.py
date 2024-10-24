@@ -1,4 +1,6 @@
 import itertools
+import threading
+import time
 import unittest
 import os,sys, shutil
 import csv
@@ -9,7 +11,7 @@ from openpyxl import load_workbook
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
 import Logger
-from Executor.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection
+from Executor.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection, retry_transaction
 from Executor.enums.file_types import FileType
 
 class TestSQLExecutorIntegration(unittest.TestCase):
@@ -40,12 +42,14 @@ class TestSQLExecutorIntegration(unittest.TestCase):
 
         # Can comment any database if want to test only the other.
         cls.databases = {}
+        cls.config_file = './Configs/Database_Config.ini'
+        cls.environment = 'test' 
         
         if config.getboolean('TestSettings', 'TestOracle'):
-            cls.databases['oracle'] = SQLExecutor(OracleConnection(), config_file='./Configs/Database_Config.ini', environment='test')
+            cls.databases['oracle'] = SQLExecutor(OracleConnection(), config_file=cls.config_file, environment=cls.environment)
         
         if config.getboolean('TestSettings', 'TestPostgres'):
-            cls.databases['postgres'] = SQLExecutor(PostgresConnection(), config_file='./Configs/Database_Config.ini', environment='test')
+            cls.databases['postgres'] = SQLExecutor(PostgresConnection(), config_file=cls.config_file, environment=cls.environment)
 
         # Connect to the databases
         for db_type, db in cls.databases.items():
@@ -303,42 +307,76 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     # If no exception was caught, this means the transaction did not rollback as expected
                     self.fail(f"Transaction did not roll back in {db_type} as expected on division by zero.")
 
-    # def test_retry_on_insert_after_connection_loss(self):
-    #     """Test retry mechanism when the database connection is lost between the process."""
-    #     for db_type, db in self.databases.items():
-    #         with self.subTest(db=db_type):
-    #             self.logger.info(f"Running connection terminate test for {db_type} database.")
+    def test_retry_on_insert_after_connection_loss(self):
+        """Test retry mechanism when the database connection is lost between the process."""
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                self.logger.info(f"Running connection terminate test for {db_type} database.")
 
-    #             try:
-    #                 # Start a transaction
-    #                 with db.transaction():
-    #                     if db_type == 'postgres':
-    #                         db.execute_query("INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES (902, 'Actor 902', 'Male', 'Should be rolled back')")
-    #                         db.execute_query("""
-    #                                             SELECT pg_terminate_backend(pid)
-    #                                             FROM pg_stat_activity
-    #                                             WHERE pid <> pg_backend_pid()
-    #                                             AND datname = 'test_database_name'; 
-    #                                         """)
-    #                     elif db_type == 'oracle':
-    #                         db.execute_query("INSERT INTO TestActors (PK_ID, NAME, SEX, BIO) VALUES (902, 'Actor 902', 'Male', 'Should be rolled back')")
-    #                         db.execute_query("SELECT 1/0 AS db_exception FROM dual")
+                try:
+                    pid = 0
+                    if db_type == 'postgres':
+                        batches  = db.get_batches_by_query("SELECT pg_backend_pid();",page_size=1)
+                        rows = [row for row in itertools.chain.from_iterable(batches)]
+                        pid = rows[0]['pg_backend_pid']
 
-    #                 # If no exception was raised, fail the test
-    #                 self.fail(f"Expected division by zero exception in {db_type} did not occur.")
+                    @retry_transaction()
+                    def block_1(db, config_file, environment):
+                        if db_type == 'postgres':
+                            with db.transaction():
+                                # Insert before termination
+                                db.execute_query('''INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES
+                                                (901, 'Before Termination Actor', 'Male', 'hero hero');''')
+                                time.sleep(3)  # Simulate delay
 
-    #             except Exception as e:
-    #                 # Expected error occurred, check rollback
-    #                 self.logger.info(f"Division by zero error occurred as expected in {db_type}: {e}")
+                                # Insert after termination
+                                db.execute_query('''INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES
+                                                (902, 'After Termination Actor', 'Male', 'hero hero');''')
+                        elif db_type == 'oracle':
+                            with db.transaction():
+                                # Insert before termination
+                                db.execute_query('''INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
+                                    VALUES (901, 'Before Termination Actor', 'Male', 'hero hero')''')
 
-    #                 # Now check that the insert was rolled back
-    #                 batches = db.get_batches_by_query("SELECT * FROM TestActors WHERE \"PK_ID\" = 902", page_size = 1)
-    #                 rows = [row for row in itertools.chain.from_iterable(batches)]
-    #                 self.assertEqual(len(rows), 0, f"Transaction did not roll back in {db_type}; found row with PK_ID 902.")
+                                time.sleep(3)  # Simulate delay
 
-    #             else:
-    #                 # If no exception was caught, this means the transaction did not rollback as expected
-    #                 self.fail(f"Transaction did not roll back in {db_type} as expected on division by zero.")
+                                # Insert after termination
+                                db.execute_query('''INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
+                                    VALUES (902, 'After Termination Actor', 'Male', 'hero hero')''')
+
+                    def block_2(db):
+                        # Terminate a backend process (replace {pid} with actual process ID)
+                        time.sleep(2)
+
+                        if db_type == 'postgres':
+                            db.execute_query(f"""
+                                SELECT pg_terminate_backend({pid})
+                            """)
+                        elif db_type == 'oracle':
+                            db.close()
+
+
+                    # Creating threads
+                    thread1 = threading.Thread(target=block_1, args=(db, self.config_file, self.environment))
+                    thread2 = threading.Thread(target=block_2, args=(db,))
+
+                    # Starting threads
+                    thread1.start()
+                    thread2.start()
+                    
+                    # Waiting for both threads to finish
+                    thread1.join()
+                    thread2.join()
+
+                    # Now check that the insert was rolled back
+                    batches = db.get_batches_by_query("SELECT * FROM TestActors WHERE \"PK_ID\" IN (901,902) ORDER BY \"PK_ID\"", page_size = 1)
+                    rows = [row for row in itertools.chain.from_iterable(batches)]
+
+                    self.assertEqual(len(rows), 2, f"Transaction did not start from first or failed to reconnect with {db_type};")
+                except:
+                    self.fail(f"Transaction did not start from first or failed to reconnect with {db_type};")
+    
+
 
     def verify_multiQuery_files(self, db_type, list_data, file_name):
         """Helper method to save multiquery data and verify CSV, TXT, Excel files."""

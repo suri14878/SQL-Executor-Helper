@@ -9,7 +9,6 @@ from openpyxl import Workbook, load_workbook
 from Executor.enums.file_types import FileType
 import logging
 import time
-import math
 
 # Retry decorator with exponential backoff
 def retry(tries, delay=3, backoff=2, exceptions=(Exception,)):
@@ -30,20 +29,62 @@ def retry(tries, delay=3, backoff=2, exceptions=(Exception,)):
         raise ValueError("delay must be greater than 0")
 
     def deco_retry(f):
-        def f_retry(*args, **kwargs):
+        def f_retry(self, *args, **kwargs):
             mtries, mdelay = tries, delay
             while mtries > 0:
                 try:
-                    return f(*args, **kwargs)
+                    return f(self, *args, **kwargs)
                 except exceptions as e:
-                    print(f"Retrying due to {e} (Remaining attempts: {mtries-1})...")
-                    mtries -= 1
-                    if mtries == 0:
-                        raise  # If out of tries, raise the last exception
-                    time.sleep(mdelay)
-                    mdelay *= backoff
+                    if self.is_terminated():
+                        print(f"Retrying due to {e} (Remaining attempts: {mtries-1})...")
+                        mtries -= 1
+                        if mtries == 0:
+                            raise  # If out of tries, raise the last exception
+                        time.sleep(mdelay)
+                        mdelay *= backoff
+                    else:
+                        raise
         return f_retry
     return deco_retry
+
+# Retry decorator with exponential backoff
+def retry_transaction(tries=3, delay=3, backoff=2, exceptions=(Exception,)):
+    """
+    Retry calling the decorated function using an exponential backoff.
+
+    :param tries: Number of attempts to try (not retry) before giving up.
+    :param delay: Initial delay between attempts in seconds.
+    :param backoff: Multiplier applied to the delay after each retry.
+    :param exceptions: Exceptions to catch and trigger retry.
+    :raises: Last exception encountered.
+    """
+    if backoff <= 1:
+        raise ValueError("backoff must be greater than 1")
+    if tries < 0:
+        raise ValueError("tries must be 0 or greater")
+    if delay <= 0:
+        raise ValueError("delay must be greater than 0")
+
+    def deco_retry(f):
+        def f_retry(connection, config_file, environment, *args, **kwargs):
+            mtries, mdelay = tries, delay
+            while mtries > 0:
+                try:
+                    return f(connection, config_file, environment, *args, **kwargs)
+                except exceptions as e:
+                    if connection.is_terminated():
+                        print(f"Retrying due to Error: {e} (Remaining attempts: {mtries-1})...")
+                        mtries -= 1
+                        if mtries == 0:
+                            raise  # If out of tries, raise the last exception
+                        time.sleep(mdelay)
+                        connection.connect(config_file, environment)
+                        mdelay *= backoff
+                    else:
+                        raise
+        return f_retry
+    return deco_retry
+
 
 class UniqueDictRowFactory:
     def __init__(self, cursor: psycopg.Cursor):
@@ -137,16 +178,9 @@ class PostgresConnection(GeneralConnection):
             self.logger.error(f"Failed to connect to PostgreSQL: {str(e)}")
             raise
 
-    def is_closed(self):
+    def is_terminated(self):
         """Check if the PostgreSQL connection is closed."""
-        if self.__connection is None:
-            return True
-        try:
-            # Check the connection status by executing a simple query
-            self.__connection.cursor().execute('SELECT 1')
-        except (psycopg.OperationalError, psycopg.InterfaceError):
-            return True
-        return False
+        return self.__connection.broken
 
     def close(self):
         """Closes the PostgreSQL database connection."""
@@ -243,17 +277,10 @@ class OracleConnection(GeneralConnection):
             self.logger.error(f"Failed to connect to Oracle: {str(e)}")
             raise
 
-    def is_closed(self):
+    def is_terminated(self):
         """Check if the Oracle connection is closed."""
-        if self.__connection is None:
-            return True
-        try:
-            # Check the connection status by executing a simple query
-            self.__connection.cursor().execute('SELECT 1 FROM dual')
-        except (oracledb.DatabaseError, oracledb.InterfaceError):
-            return True
-        return False
-
+        # Check the connection status by executing a simple query
+        return not self.__connection.is_healthy()
 
     def close(self):
         """Closes the Oracle database connection."""
@@ -374,6 +401,9 @@ class SQLExecutor:
     def __del__(self):
         """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
+    
+    def connect(self, config_file, environment):
+        self.__db_connection.connect(config_file, environment)
 
     def __get_cursor(self, is_client_cursor = None):
         """Returns a new cursor. Each method will call this to open a new cursor."""    
@@ -385,12 +415,15 @@ class SQLExecutor:
     def transaction(self):
         return Transaction(self.__db_connection)
 
-    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
+    def is_terminated(self):
+        return self.__db_connection.is_terminated()
+
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
     def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
         """Executes Select SQL queries from a file."""
         try:
             # Check if the connection is None or has been closed
-            if self.__db_connection is None or self.__db_connection.is_closed():
+            if self.__db_connection is None or self.__db_connection.is_terminated():
                 self.logger.info("Database connection is not active, attempting to reconnect.")
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
@@ -471,7 +504,7 @@ class SQLExecutor:
         """Executes Select SQL files from a folder and saves the results."""
 
         # Check if the connection is None or has been closed
-        if self.__db_connection is None or self.__db_connection.is_closed():
+        if self.__db_connection is None or self.__db_connection.is_terminated():
             self.logger.info("Database connection is not active, attempting to reconnect.")
             self.__db_connection.connect(self.__config_file, self.__environment)
         else:
@@ -487,32 +520,20 @@ class SQLExecutor:
                     # Execute each file and save the results
                     self.execute_file_and_save(file_path, f"{result_save_path}{os.path.splitext(file_name)[0]}", result_file_type, batch_size, row_limit)
 
-    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def execute_query(self, query, params=None):
         """Executes any SQL query (INSERT, DELETE, UPDATE, or others) with transaction management."""
-        # Check if the connection is None or has been closed
-        if self.__db_connection is None or self.__db_connection.is_closed():
-            self.logger.info("Database connection is not active, attempting to reconnect.")
-            self.__db_connection.connect(self.__config_file, self.__environment)
-        else:
-            with self.__get_cursor(is_client_cursor=True) as cursor:
-                cursor.execute(query, params)
+        with self.__get_cursor(is_client_cursor=True) as cursor:
+            cursor.execute(query, params)
 
-    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
     def execute_file(self, file_name):
         """Executes a series of SQL queries from a file, with each query separated by ';'."""
         try:
-            # Check if the connection is None or has been closed
-            if self.__db_connection is None or self.__db_connection.is_closed():
-                self.logger.info("Database connection is not active, attempting to reconnect.")
-                self.__db_connection.connect(self.__config_file, self.__environment)
-            else:
-                with open(file_name, 'r') as file:
-                    queries = file.read().split(';')
-                    queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
-                    for query in queries:
-                        with self.__get_cursor(is_client_cursor=True) as cursor:
-                            cursor.execute(query)
+            with open(file_name, 'r') as file:
+                queries = file.read().split(';')
+                queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
+                for query in queries:
+                    with self.__get_cursor(is_client_cursor=True) as cursor:
+                        cursor.execute(query)
 
         except FileNotFoundError:
             self.logger.error(f"SQL file not found: {file_name}")
@@ -535,12 +556,12 @@ class SQLExecutor:
             return True, int(match.group(1))  # Return pagination flag and page size as an integer
         return False, None  # Return False if no pagination information is found
 
-    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
     def get_batches_by_query(self, query, page_size, params=None):
         """Gets query by batches."""
         try:
             # Check if the connection is None or has been closed
-            if self.__db_connection is None or self.__db_connection.is_closed():
+            if self.__db_connection is None or self.__db_connection.is_terminated():
                 self.logger.info("Database connection is not active, attempting to reconnect.")
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
@@ -558,10 +579,10 @@ class SQLExecutor:
         finally:
                 self.__db_connection.commit()
 
-    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
+    @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
     def map_rows_to_objects(self, query, my_class, page_size, params=None):
         # Check if the connection is None or has been closed
-        if self.__db_connection is None or self.__db_connection.is_closed():
+        if self.__db_connection is None or self.__db_connection.is_terminated():
             self.logger.info("Database connection is not active, attempting to reconnect.")
             self.__db_connection.connect(self.__config_file, self.__environment)
         else:
