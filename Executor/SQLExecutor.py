@@ -204,7 +204,7 @@ class PostgresConnection(GeneralConnection):
                 # Always return a client cursor (client-side)
                 return PostgresCursor(self.__connection.cursor())
             else:
-                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}"), withhold = True)
+                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}", withhold = True))
         except Exception as e:
             self.logger.error(f"Failed to create PostgreSQL cursor: {str(e)}")
             raise

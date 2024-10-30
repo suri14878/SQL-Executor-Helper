@@ -122,7 +122,7 @@ These will use server-side cursors to fetch the results, By default oracle has s
         self.instance_note = instance_note
 
    # Here I'm passing query along with EventInstance class to the method whill will yeild batches of (list of class objects) for a given page_size.
-   batch_instances = postgres_db.map_rows_to_instances('SELECT * FROM event_tracker.event_instances', EventInstance, page_size=5)
+   batch_instances = postgres_db.map_rows_to_objects('SELECT * FROM event_tracker.event_instances', EventInstance, page_size=5)
    for instances in batch_instances:
        for instance in instances:
            print(instance.lifecycle_stage)
