@@ -1,7 +1,7 @@
 import setuptools
 
 setuptools.setup(
-    name='SQLExecutor',
+    name='Executor',
     version='0.0.1',
     install_requires=[
         'oracledb==2.4.1',

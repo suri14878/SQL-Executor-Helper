@@ -204,7 +204,7 @@ class PostgresConnection(GeneralConnection):
                 # Always return a client cursor (client-side)
                 return PostgresCursor(self.__connection.cursor())
             else:
-                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}"))
+                return PostgresCursor(self.__connection.cursor(name=f"server_side_cursor_{uuid.uuid4()}"), withhold = True)
         except Exception as e:
             self.logger.error(f"Failed to create PostgreSQL cursor: {str(e)}")
             raise
@@ -581,24 +581,31 @@ class SQLExecutor:
 
     @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
     def map_rows_to_objects(self, query, my_class, page_size, params=None):
-        # Check if the connection is None or has been closed
-        if self.__db_connection is None or self.__db_connection.is_terminated():
-            self.logger.info("Database connection is not active, attempting to reconnect.")
-            self.__db_connection.connect(self.__config_file, self.__environment)
-        else:
-            objects = []
-            with self.__get_cursor() as cursor:
-                cursor.execute(query, params)
-                rows = cursor.fetchmany(page_size)
-                while rows:
-                    for row in rows:
-                        object = my_class()
-                        for key, value in row.items():
-                            # Set only the attributes that are present in the row dictionary
-                            setattr(object, key, value)
-                        objects.append(object)
-                    yield objects
+        try:
+            if self.__db_connection is None or self.__db_connection.is_terminated():
+                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.__db_connection.connect(self.__config_file, self.__environment)
+            else:
+                objects = []
+                with self.__get_cursor() as cursor:
+                    cursor.execute(query, params)
                     rows = cursor.fetchmany(page_size)
+                    while rows:
+                        for row in rows:
+                            object = my_class()
+                            for key, value in row.items():
+                                # Set only the attributes that are present in the row dictionary
+                                setattr(object, key, value)
+                            objects.append(object)
+                        yield objects
+                        rows = cursor.fetchmany(page_size)
+        except Exception as e:
+            # Rollback if an error occurs
+            self.logger.error(f"Error mapping objects by batches: {e}")
+            raise
+
+        finally:
+            self.__db_connection.commit()
 
     def close(self):
         self.__db_connection.close()
