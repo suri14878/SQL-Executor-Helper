@@ -391,7 +391,19 @@ class Transaction:
 
 # SQLExecutor class manages the connection and execution of SQL queries
 class SQLExecutor:
-    def __init__(self, db_connection: GeneralConnection, config_file='config.ini', environment='test'):
+    def __init__(self, db_connection: GeneralConnection, config_file='config.ini', environment='test') -> None:
+        """
+        Initializes a new instance of SQLExecutor.
+        This class handles database operations, including executing queries from files, saving results, and managing transactions.
+
+        Parameters:
+            db_connection (GeneralConnection): The database connection object used to interact with the database.
+            config_file (str): The path to the configuration file for the database. Defaults to 'config.ini'.
+            environment (str): The environment to use for the database connection (e.g., 'test', 'production'). Defaults to 'test'.
+
+        Returns:
+            None
+        """
         self.logger = logging.getLogger("Executor")
         self.__db_connection = db_connection
         self.__config_file = config_file
@@ -402,7 +414,17 @@ class SQLExecutor:
         """Closes the connection when the object is destroyed."""
         self.__db_connection.close()
     
-    def connect(self, config_file, environment):
+    def connect(self, config_file, environment) -> None:
+        """
+        Establishes a connection to the database using the provided configuration file and environment.
+
+        Parameters:
+            config_file (str): The path to the configuration file for the database.
+            environment (str): The environment to use for the database connection.
+
+        Returns:
+            None
+        """
         self.__db_connection.connect(config_file, environment)
 
     def __get_cursor(self, is_client_cursor = None):
@@ -412,15 +434,39 @@ class SQLExecutor:
         else:
             return self.__db_connection.get_cursor()
     
-    def transaction(self):
+    def transaction(self) -> Transaction:
+        """
+        Returns a transaction context manager for managing database transactions.
+
+        Returns:
+            Transaction: A context manager for handling transactions.
+        """
         return Transaction(self.__db_connection)
 
-    def is_terminated(self):
+    def is_terminated(self) -> bool:
+        """
+        Checks if the database connection is terminated.
+
+        Returns:
+            bool: True if the connection is terminated, False otherwise.
+        """
         return self.__db_connection.is_terminated()
 
     @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
-    def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None):
-        """Executes Select SQL queries from a file."""
+    def execute_file_and_save(self, file_name, result_file_path, result_file_type, batch_size=None, row_limit=None) -> None:
+        """
+        Executes SQL queries from a file and saves the results in the specified format.
+
+        Parameters:
+            file_name (str): The path to the file containing SQL queries.
+            result_file_path (str): The base path where the results will be saved.
+            result_file_type (FileType): The format to save the results (CSV, TXT, or Excel).
+            batch_size (int, optional): The number of rows to fetch in each batch. Defaults to None.
+            row_limit (int, optional): The maximum number of rows to fetch. Defaults to None.
+
+        Returns:
+            None
+        """
         try:
             # Check if the connection is None or has been closed
             if self.__db_connection is None or self.__db_connection.is_terminated():
@@ -500,8 +546,20 @@ class SQLExecutor:
             raise
 
     @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.InterfaceError, oracledb.InterfaceError))
-    def execute_folder_and_save(self,folder_path, result_save_path, result_file_type, batch_size=None, row_limit=None):
-        """Executes Select SQL files from a folder and saves the results."""
+    def execute_folder_and_save(self,folder_path, result_save_path, result_file_type, batch_size=None, row_limit=None) -> None:
+        """
+        Executes SQL queries from all files in a folder and saves the results in the specified format.
+
+        Parameters:
+            folder_path (str): The path to the folder containing SQL files.
+            result_save_path (str): The base path where the results will be saved.
+            result_file_type (FileType): The format to save the results (CSV, TXT, or Excel).
+            batch_size (int, optional): The number of rows to fetch in each batch. Defaults to None.
+            row_limit (int, optional): The maximum number of rows to fetch. Defaults to None.
+
+        Returns:
+            None
+        """
 
         # Check if the connection is None or has been closed
         if self.__db_connection is None or self.__db_connection.is_terminated():
@@ -520,13 +578,30 @@ class SQLExecutor:
                     # Execute each file and save the results
                     self.execute_file_and_save(file_path, f"{result_save_path}{os.path.splitext(file_name)[0]}", result_file_type, batch_size, row_limit)
 
-    def execute_query(self, query, params=None):
-        """Executes any SQL query (INSERT, DELETE, UPDATE, or others) with transaction management."""
+    def execute_query(self, query, params=None) -> None:
+        """
+        Executes a SQL query (INSERT, DELETE, UPDATE, etc.) with transaction management.
+
+        Parameters:
+            query (str): The SQL query to execute.
+            params (dict, optional): Parameters for the SQL query. Defaults to None.
+
+        Returns:
+            None
+        """
         with self.__get_cursor(is_client_cursor=True) as cursor:
             cursor.execute(query, params)
 
-    def execute_file(self, file_name):
-        """Executes a series of SQL queries from a file, with each query separated by ';'."""
+    def execute_file(self, file_name) -> None:
+        """
+        Executes SQL queries from a file, where each query is separated by a semicolon.
+
+        Parameters:
+            file_name (str): The path to the file containing SQL queries.
+
+        Returns:
+            None
+        """
         try:
             with open(file_name, 'r') as file:
                 queries = file.read().split(';')
@@ -557,8 +632,18 @@ class SQLExecutor:
         return False, None  # Return False if no pagination information is found
 
     @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
-    def get_batches_by_query(self, query, page_size, params=None):
-        """Gets query by batches."""
+    def get_batches_by_query(self, query, page_size, params=None) -> list:
+        """
+        Fetches query results in batches.
+
+        Parameters:
+            query (str): The SQL query to execute.
+            page_size (int): The number of rows to fetch per batch.
+            params (dict, optional): Parameters for the SQL query. Defaults to None.
+
+        Returns:
+            list: A list of rows fetched in batches.
+        """
         try:
             # Check if the connection is None or has been closed
             if self.__db_connection is None or self.__db_connection.is_terminated():
@@ -580,7 +665,19 @@ class SQLExecutor:
                 self.__db_connection.commit()
 
     @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
-    def map_rows_to_objects(self, query, my_class, page_size, params=None):
+    def map_rows_to_objects(self, query, my_class, page_size, params=None) -> list:
+        """
+        Maps query results to instances of the specified class in batches.
+
+        Parameters:
+            query (str): The SQL query to execute.
+            my_class (type): The class to map each row to.
+            page_size (int): The number of rows to fetch per batch.
+            params (dict, optional): Parameters for the SQL query. Defaults to None.
+
+        Returns:
+            list: A batches of list of class instances representing the query results.
+        """
         try:
             if self.__db_connection is None or self.__db_connection.is_terminated():
                 self.logger.info("Database connection is not active, attempting to reconnect.")
@@ -607,12 +704,27 @@ class SQLExecutor:
         finally:
             self.__db_connection.commit()
 
-    def close(self):
+    def close(self) -> None:
+        """
+        Closes the database connection.
+
+        Returns:
+            None
+        """
         self.__db_connection.close()
 
 
-    def get_queries_from_file(self, file_name, index=None):
-        """Returns all queries or a specific query by index from the SQL file."""
+    def get_queries_from_file(self, file_name, index=None) -> str or list:
+        """
+        Returns all queries or a specific query by index from a file.
+
+        Parameters:
+            file_name (str): The path to the file containing SQL queries.
+            index (int, optional): The index of the query to return. If None, all queries are returned.
+
+        Returns:
+            str or list: A specific query as a string if index is provided, or a list of queries otherwise.
+        """
         with open(file_name, 'r') as file:
             queries = file.read().split(';')
             queries = [query.strip() for query in queries if query.strip()]
@@ -626,8 +738,20 @@ class SQLExecutor:
             # Return all queries if no index is specified
             return queries
         
-    def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True):
-        """Appends these batches in specified file."""
+    def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True) -> None:
+        """
+        Saves data to a file in the specified format.
+
+        Parameters:
+            data (list): The data to save.
+            result_file (str): The name of the file to save the data.
+            result_file_type (FileType): The format to save the data (CSV, TXT, or Excel).
+            is_append (bool): Whether to append to the file if it exists. Defaults to False.
+            include_header (bool): Whether to include headers in the file. Defaults to True.
+
+        Returns:
+            None
+        """
         if result_file_type == FileType.CSV:
             self.__save_to_csv(data,result_file, is_append, include_header)    
         elif result_file_type == FileType.TXT:

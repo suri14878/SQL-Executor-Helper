@@ -9,7 +9,7 @@ Below are the steps to install and execute the SQL-Executor-Helper project:
 ### Include in requirements.txt to pip install:
 To include the project, add the following line to your requirements.txt. You will have to be logged into your git account on the host machine.
 ```
-SQL-Executor-Helper@git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
+Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 ```
 ### Installation without git crendentials
 1. Clone the repository:
