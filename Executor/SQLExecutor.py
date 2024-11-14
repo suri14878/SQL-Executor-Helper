@@ -713,10 +713,10 @@ class SQLExecutor:
         """
         self.__db_connection.close()
 
-
+    @staticmethod
     def get_queries_from_file(self, file_name, index=None) -> str or list:
         """
-        Returns all queries or a specific query by index from a file.
+        Static Method Returns all queries or a specific query by index from a file.
 
         Parameters:
             file_name (str): The path to the file containing SQL queries.
