@@ -48,10 +48,11 @@ def retry(tries, delay=3, backoff=2, exceptions=(Exception,)):
     return deco_retry
 
 # Retry decorator with exponential backoff
-def retry_transaction(tries=3, delay=3, backoff=2, exceptions=(Exception,)):
+def retry_transaction(default_args, tries=3, delay=3, backoff=2, exceptions=(Exception,)):
     """
-    Retry calling the decorated function using an exponential backoff.
+    Retry calling the decorated function using an exponential backoff and dynamic argument defaults.
 
+    :param default_args: Dictionary mapping argument names to their default values.
     :param tries: Number of attempts to try (not retry) before giving up.
     :param delay: Initial delay between attempts in seconds.
     :param backoff: Multiplier applied to the delay after each retry.
@@ -66,24 +67,25 @@ def retry_transaction(tries=3, delay=3, backoff=2, exceptions=(Exception,)):
         raise ValueError("delay must be greater than 0")
 
     def deco_retry(f):
-        def f_retry(connection, config_file, environment, *args, **kwargs):
+        def f_retry(self, *args, **kwargs):
             mtries, mdelay = tries, delay
             while mtries > 0:
                 try:
-                    return f(connection, config_file, environment, *args, **kwargs)
+                    return f(self, *args, **kwargs)
                 except exceptions as e:
-                    if connection.is_terminated():
+                    if default_args['db'].is_terminated():
                         print(f"Retrying due to Error: {e} (Remaining attempts: {mtries-1})...")
                         mtries -= 1
                         if mtries == 0:
                             raise  # If out of tries, raise the last exception
                         time.sleep(mdelay)
-                        connection.connect(config_file, environment)
+                        default_args['db'].connect(default_args['config_file'], default_args['environment'])
                         mdelay *= backoff
                     else:
                         raise
         return f_retry
     return deco_retry
+
 
 
 class UniqueDictRowFactory:

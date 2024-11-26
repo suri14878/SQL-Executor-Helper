@@ -320,8 +320,12 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                         rows = [row for row in itertools.chain.from_iterable(batches)]
                         pid = rows[0]['pg_backend_pid']
 
-                    @retry_transaction()
-                    def block_1(db, config_file, environment):
+                    @retry_transaction(default_args={
+                        'db': db,
+                        'config_file': self.config_file,
+                        'environment': self.environment
+                    })
+                    def block_1(db):
                         if db_type == 'postgres':
                             with db.transaction():
                                 # Insert before termination
@@ -357,7 +361,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
 
 
                     # Creating threads
-                    thread1 = threading.Thread(target=block_1, args=(db, self.config_file, self.environment))
+                    thread1 = threading.Thread(target=block_1, args=(db,))
                     thread2 = threading.Thread(target=block_2, args=(db,))
 
                     # Starting threads
