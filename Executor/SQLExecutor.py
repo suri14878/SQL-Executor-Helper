@@ -52,7 +52,7 @@ def retry_transaction(default_args, tries=3, delay=3, backoff=2, exceptions=(Exc
     """
     Retry calling the decorated function using an exponential backoff and dynamic argument defaults.
 
-    :param default_args: Dictionary mapping argument names to their default values.
+    :param default_args: Dictionary mapping argument names to getter functions (lambdas) or direct values.
     :param tries: Number of attempts to try (not retry) before giving up.
     :param delay: Initial delay between attempts in seconds.
     :param backoff: Multiplier applied to the delay after each retry.
@@ -68,25 +68,35 @@ def retry_transaction(default_args, tries=3, delay=3, backoff=2, exceptions=(Exc
 
     def deco_retry(f):
         def f_retry(self, *args, **kwargs):
+            # Create a new dictionary for arguments to avoid modifying original kwargs
+            new_kwargs = kwargs.copy()
+
+            # Populate new_kwargs dynamically using arg_getters
+            for arg_name, getter in default_args.items():
+                if callable(getter):
+                    # If the getter is a lambda or callable function, invoke it
+                    new_kwargs[arg_name] = getter(self)
+                else:
+                    # If the getter is not callable, assume it's a direct value
+                    new_kwargs[arg_name] = getter
+
             mtries, mdelay = tries, delay
             while mtries > 0:
                 try:
                     return f(self, *args, **kwargs)
                 except exceptions as e:
-                    if default_args['db'].is_terminated():
+                    if new_kwargs['db'].is_terminated():
                         print(f"Retrying due to Error: {e} (Remaining attempts: {mtries-1})...")
                         mtries -= 1
                         if mtries == 0:
                             raise  # If out of tries, raise the last exception
                         time.sleep(mdelay)
-                        default_args['db'].connect(default_args['config_file'], default_args['environment'])
+                        new_kwargs['db'].connect(new_kwargs['config_file'], new_kwargs['environment'])
                         mdelay *= backoff
                     else:
                         raise
         return f_retry
     return deco_retry
-
-
 
 class UniqueDictRowFactory:
     def __init__(self, cursor: psycopg.Cursor):
