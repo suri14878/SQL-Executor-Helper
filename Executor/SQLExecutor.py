@@ -651,7 +651,7 @@ class SQLExecutor:
         Parameters:
             query (str): The SQL query to execute.
             page_size (int): The number of rows to fetch per batch.
-            params (dict, optional): Parameters for the SQL query. Defaults to None.
+            params (optional): Parameters for the SQL query. Defaults to None.
 
         Returns:
             list: A list of rows fetched in batches.

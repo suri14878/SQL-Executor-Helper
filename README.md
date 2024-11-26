@@ -39,18 +39,18 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
    
     For Oracle:
     
-    ```bash
+    ```python
     oracle_db = SQLExecutor(OracleConnection(), config_file='./Configs/Database_Config.ini', environment='test')
     ```
     For Postgres:
-    ``` bash
+    ``` python
     postgres_db = SQLExecutor(PostgresConnection(), config_file='./Configs/Database_Config.ini', environment='test')
     ```
 
 
 2.  **Executing a File and Saving the Result**: To execute a SQL file and save the result (whether it's a single query or a multi-query file):
 
-    ```bash
+    ```python
       db.execute_file_and_save(file_name, result_file_path, result_file_type=FileType.CSV)
       ```
 
@@ -61,7 +61,7 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
     -   If the file contains multiple queries, each query will be saved in a separate file, with an index number appended to the result_file_path.
 3.  **Executing a Folder and Saving Results**: To execute all SQL files inside a folder and save the results:
 
-    ```bash
+    ```python
       db.execute_folder_and_save(folder_path, result_save_path, result_file_type=FileType.CSV)
       ```
 
@@ -75,14 +75,14 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 
     -   **Pagination**: Add the following comment above a query to paginate the result:
 
-        ```bash
+        ```SQL
          /* PAGINATE SIZE 2 */
         SELECT * FROM SampleTable;
          ```
 
     -   **Row Limit**: Add the following comment above a query to limit the number of rows returned:
 
-       ```bash 
+       ```SQL 
          /* ROW LIMIT 10 */
         SELECT * FROM SampleTable;
       ```
@@ -95,21 +95,38 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 These will use server-side cursors to fetch the results, By default oracle has server-side cursors.
 
 1.  You can get queries by file:
-     ```bash
+     ```python
       queries = db.get_queries_from_file('filename.sql')
       ```
 2.  You can get query by index:
-      ```bash
+      ```python
       queries = db.get_query_by_index('filename.sql', index=1)
       ```
 3. You can get rows by batches and save them to specified file type:
-      ```bash
-      batches = oracle_db.get_batches_by_query(query, page_size=3)
-      for i, batch in enumerate(batches):
-          oracle_db.save_to_csv(batch, 'test', is_append= True if i!=0 else False, include_header=True if i==0 else False)
+      ```python
+        batches = db.get_batches_by_query(query, page_size=3)
+        for i, batch in enumerate(batches):
+            db.save_to_csv(batch, 'test', is_append= True if i!=0 else False, include_header=True if i==0 else False)
       ```
+      You can also pass parameters like below.  
+      - **For Oracle:**
+      ```python
+        lang ='English'
+        batches  = oracle_db.get_batches_by_query(f"SELECT * FROM MOVIES WHERE LANGUAGE = :lang", page_size=5, params=[lang])
+        rows = [row for row in itertools.chain.from_iterable(batches)]
+        print(rows)
+      ```
+      For more details (Oracle): https://python-oracledb.readthedocs.io/en/latest/user_guide/bind.html  
+      - **For Postgres:**
+      ```python
+        lang ='English'
+        batches  = oracle_db.get_batches_by_query(f"SELECT * FROM MOVIES WHERE LANGUAGE = %s", page_size=5, params=[lang])
+        rows = [row for row in itertools.chain.from_iterable(batches)]
+        print(rows)
+      ```
+      For more details (Postgres): https://www.psycopg.org/psycopg3/docs/basic/params.html
 4. There is a mapping method where we can map the fetched results into a list of provide class object. Below is the example of how you can use it.
-   ```bash
+   ```python
    # This is a example of EventInstance class.
    class EventInstance:
     def __init__(self, instance_index=None, definition_index=None, instance_period=None, 
@@ -129,7 +146,7 @@ These will use server-side cursors to fetch the results, By default oracle has s
    ```
 ### Here is how you can use Data Manipulation Language (DML) commands
 
-```bash
+```python
 @retry_transaction()
 def insert_queries(db, config_file, environment):
     with db.transaction():
