@@ -1,3 +1,6 @@
+import itertools
+import threading
+import time
 import unittest
 import os,sys, shutil
 import csv
@@ -7,8 +10,8 @@ from openpyxl import load_workbook
 # Get the parent directory
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, parent_dir)
-from Executor.Helpers import Logger
-from Executor.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection
+import Logger
+from Executor.SQLExecutor import SQLExecutor, OracleConnection, PostgresConnection, retry_transaction
 from Executor.enums.file_types import FileType
 
 class TestSQLExecutorIntegration(unittest.TestCase):
@@ -21,7 +24,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         config = cls.load_config()
 
         # Create Logger
-        logging = Logger.create_logger()
+        logging = Logger.create_root()
         cls.logger = logging.getLogger('Tester')
         cls.logger.info("Setting up the databases and test environment...")
 
@@ -39,12 +42,14 @@ class TestSQLExecutorIntegration(unittest.TestCase):
 
         # Can comment any database if want to test only the other.
         cls.databases = {}
+        cls.config_file = './Configs/Database_Config.ini'
+        cls.environment = 'test' 
         
         if config.getboolean('TestSettings', 'TestOracle'):
-            cls.databases['oracle'] = SQLExecutor(OracleConnection(), config_file='./Configs/Database_Config.ini', environment='test')
+            cls.databases['oracle'] = SQLExecutor(OracleConnection(), config_file=cls.config_file, environment=cls.environment)
         
         if config.getboolean('TestSettings', 'TestPostgres'):
-            cls.databases['postgres'] = SQLExecutor(PostgresConnection(), config_file='./Configs/Database_Config.ini', environment='test')
+            cls.databases['postgres'] = SQLExecutor(PostgresConnection(), config_file=cls.config_file, environment=cls.environment)
 
         # Connect to the databases
         for db_type, db in cls.databases.items():
@@ -115,8 +120,8 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Oracle-specific tables and data."""
         cls.logger.info("Setting up Oracle database...")
         try:
-            with db._get_cursor() as cursor:
-                cursor.execute("""
+            with db.transaction():
+                db.execute_query("""
                 BEGIN
                 EXECUTE IMMEDIATE 'DROP TABLE TestActors CASCADE CONSTRAINTS';
                 EXCEPTION
@@ -126,7 +131,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     END IF;
                 END;
                 """)
-                cursor.execute("""
+                db.execute_query("""
                     CREATE TABLE TestActors (
                         PK_ID INTEGER PRIMARY KEY,
                         NAME VARCHAR(100),
@@ -135,12 +140,11 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     )
                 """)
                 for i in range(1, 11):
-                    cursor.execute(f"""
+                    db.execute_query(f"""
                         INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
                         VALUES ({i}, 'Actor {i}', 'Male', 'Bio of Actor {i}')
                     """)
-                cursor.execute("COMMIT")
-                cls.logger.info("Oracle database setup completed.")
+            cls.logger.info("Oracle database setup completed.")
         except Exception as e:
             cls.logger.error(f"Error setting up Oracle database: {e}")
 
@@ -149,9 +153,9 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         """Setup Postgres-specific tables and data."""
         cls.logger.info("Setting up Postgres database...")
         try:
-            with db._get_cursor(is_client_cursor=True) as cursor:
-                cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE;")
-                cursor.execute("""
+            with db.transaction():
+                db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE;")
+                db.execute_query("""
                     CREATE TABLE TestActors (
                         "PK_ID" SERIAL PRIMARY KEY,
                         "NAME" VARCHAR(100),
@@ -159,12 +163,12 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                         "BIO" TEXT
                     )
                 """)
+
                 for i in range(1, 11):
-                    cursor.execute(f"""
+                    db.execute_query(f"""
                         INSERT INTO TestActors ("NAME", "SEX", "BIO")
                         VALUES ('Actor {i}', 'Male', 'Bio of Actor {i}')
                     """)
-                cursor.execute("COMMIT")
                 cls.logger.info("Postgres database setup completed.")
         except Exception as e:
             cls.logger.error(f"Error setting up Postgres database: {e}")
@@ -271,6 +275,113 @@ class TestSQLExecutorIntegration(unittest.TestCase):
                     self.logger.error(f"Error in folder query test for {db_type}: {e}")
                     raise
 
+    def test_transaction_rollback_on_error(self):
+        """Test that a transaction rolls back on error, specifically on a division by zero error."""
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                self.logger.info(f"Running transaction rollback test for {db_type} database.")
+                
+                try:
+                    # Start a transaction
+                    with db.transaction():
+                        if db_type == 'postgres':
+                            db.execute_query("INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES (900, 'Actor 900', 'Male', 'Should be rolled back')")
+                            db.execute_query("SELECT 1/0 AS db_exception")
+                        elif db_type == 'oracle':
+                            db.execute_query("INSERT INTO TestActors (PK_ID, NAME, SEX, BIO) VALUES (900, 'Actor 900', 'Male', 'Should be rolled back')")
+                            db.execute_query("SELECT 1/0 AS db_exception FROM dual")
+
+                    # If no exception was raised, fail the test
+                    self.fail(f"Expected division by zero exception in {db_type} did not occur.")
+
+                except Exception as e:
+                    # Expected error occurred, check rollback
+                    self.logger.info(f"Division by zero error occurred as expected in {db_type}: {e}")
+
+                    # Now check that the insert was rolled back
+                    batches = db.get_batches_by_query("SELECT * FROM TestActors WHERE \"PK_ID\" = 900", page_size = 1)
+                    rows = [row for row in itertools.chain.from_iterable(batches)]
+                    self.assertEqual(len(rows), 0, f"Transaction did not roll back in {db_type}; found row with PK_ID 900.")
+
+                else:
+                    # If no exception was caught, this means the transaction did not rollback as expected
+                    self.fail(f"Transaction did not roll back in {db_type} as expected on division by zero.")
+
+    def test_retry_on_insert_after_connection_loss(self):
+        """Test retry mechanism when the database connection is lost between the process."""
+        for db_type, db in self.databases.items():
+            with self.subTest(db=db_type):
+                self.logger.info(f"Running connection terminate test for {db_type} database.")
+
+                try:
+                    pid = 0
+                    if db_type == 'postgres':
+                        batches  = db.get_batches_by_query("SELECT pg_backend_pid();",page_size=1)
+                        rows = [row for row in itertools.chain.from_iterable(batches)]
+                        pid = rows[0]['pg_backend_pid']
+
+                    @retry_transaction(default_args={
+                        'db': db,
+                        'config_file': self.config_file,
+                        'environment': self.environment
+                    })
+                    def block_1(db):
+                        if db_type == 'postgres':
+                            with db.transaction():
+                                # Insert before termination
+                                db.execute_query('''INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES
+                                                (901, 'Before Termination Actor', 'Male', 'hero hero');''')
+                                time.sleep(3)  # Simulate delay
+
+                                # Insert after termination
+                                db.execute_query('''INSERT INTO TestActors (\"PK_ID\", \"NAME\", \"SEX\", \"BIO\") VALUES
+                                                (902, 'After Termination Actor', 'Male', 'hero hero');''')
+                        elif db_type == 'oracle':
+                            with db.transaction():
+                                # Insert before termination
+                                db.execute_query('''INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
+                                    VALUES (901, 'Before Termination Actor', 'Male', 'hero hero')''')
+
+                                time.sleep(3)  # Simulate delay
+
+                                # Insert after termination
+                                db.execute_query('''INSERT INTO TestActors (PK_ID, NAME, SEX, BIO)
+                                    VALUES (902, 'After Termination Actor', 'Male', 'hero hero')''')
+
+                    def block_2(db):
+                        # Terminate a backend process (replace {pid} with actual process ID)
+                        time.sleep(2)
+
+                        if db_type == 'postgres':
+                            db.execute_query(f"""
+                                SELECT pg_terminate_backend({pid})
+                            """)
+                        elif db_type == 'oracle':
+                            db.close()
+
+
+                    # Creating threads
+                    thread1 = threading.Thread(target=block_1, args=(db,))
+                    thread2 = threading.Thread(target=block_2, args=(db,))
+
+                    # Starting threads
+                    thread1.start()
+                    thread2.start()
+                    
+                    # Waiting for both threads to finish
+                    thread1.join()
+                    thread2.join()
+
+                    # Now check that the insert was rolled back
+                    batches = db.get_batches_by_query("SELECT * FROM TestActors WHERE \"PK_ID\" IN (901,902) ORDER BY \"PK_ID\"", page_size = 1)
+                    rows = [row for row in itertools.chain.from_iterable(batches)]
+
+                    self.assertEqual(len(rows), 2, f"Transaction did not start from first or failed to reconnect with {db_type};")
+                except:
+                    self.fail(f"Transaction did not start from first or failed to reconnect with {db_type};")
+    
+
+
     def verify_multiQuery_files(self, db_type, list_data, file_name):
         """Helper method to save multiquery data and verify CSV, TXT, Excel files."""
         output_dir = './Test/TestFiles/'
@@ -366,12 +477,11 @@ class TestSQLExecutorIntegration(unittest.TestCase):
         cls.logger.info("Tearing down test environment...")
         for db_type, db in cls.databases.items():
             try:
-                with db._get_cursor(is_client_cursor=True) if db_type == 'postgres' else db._get_cursor() as cursor:
+                with db.transaction():
                     if db_type == 'oracle':
-                        cursor.execute("DROP TABLE TestActors CASCADE CONSTRAINTS")
+                        db.execute_query("DROP TABLE TestActors CASCADE CONSTRAINTS")
                     elif db_type == 'postgres':
-                        cursor.execute("DROP TABLE IF EXISTS TestActors CASCADE")
-                    cursor.execute("COMMIT")
+                        db.execute_query("DROP TABLE IF EXISTS TestActors CASCADE")
                     cls.logger.info(f"{db_type} test table dropped.")
             except Exception as e:
                 cls.logger.error(f"Error dropping {db_type} table: {e}")
