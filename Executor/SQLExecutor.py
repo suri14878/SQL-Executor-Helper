@@ -273,8 +273,6 @@ class OracleConnection(GeneralConnection):
             config = configparser.ConfigParser()
             config.read(config_file)
             env_section = f'{environment}_oracle'
-            val = config[env_section].get('sid')
-            val2 = config[env_section].get('service_name')
             if config[env_section].get('sid') is not None:
                 dsn = oracledb.makedsn(
                     config[env_section]['host'],
