@@ -1,17 +1,12 @@
 # SQL-Executor-Helper
+This project will help to interact with both Postgres and Oracle Databases. This will serve as the primary access pattern/system to submit SQL queries.
 
-## Introduction
-The SQL Executor Helper project will help to interact with both Postgres and Oracle Databases. This will serve as the primary access pattern/system to submit.
-
-## How to Install the Project
-Below are the steps to install and execute the SQL-Executor-Helper project:
-
-### Include in requirements.txt to pip install:
+### Installation with git credentials (easiest):
 To include the project, add the following line to your requirements.txt. You will have to be logged into your git account on the host machine.
 ```
 Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 ```
-### Installation without git crendentials
+### Installation without git credentials
 1. Clone the repository:
    ```git clone https://github.com/ULL-IR-Office/SQL-Executor-Helper.git```
 
@@ -26,15 +21,16 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 ./Packages/executor-0.0.1.tar.gz
 ```
 
-## How to Test the project
+## How to Unit Test the project
 1. Make sure you have already created virtual environment, If not you can setup by running `Create Virtual Environment.bat` file within the `Batch Scripts` subfolder.
 2. Set up the default configurations. Run the `Create Configs.py` file in the `Setup` folder. This will create a configs subfolder and configuration files for the logger.
-3. Put any sample query in `Test/SQL Files/sample.sql` file.
-4. Make sure that you have correct configs for database in `Configs/Database_Config.ini`.
-5. Run the `Test/Test.py` file.
+3. Make sure that you have correct configs for database in `Configs/Database_Config.ini`.
+4. Run the `Test/Unit Tests.py` file.
+5. Alternatively, there's a `Basic Connection.py` file that can be used for one-off queries.
 
-## How to Utilize the Project
+## Programatic Usage
 
+### Basics (Connection & Select Statements)
 1.  **Connecting to Databases**: You can easily connect to either Postgres or Oracle databases using the following commands:  
    
     For Oracle:
@@ -47,18 +43,18 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
     postgres_db = SQLExecutor(PostgresConnection(), config_file='./Configs/Database_Config.ini', environment='test')
     ```
 
-
 2.  **Executing a File and Saving the Result**: To execute a SQL file and save the result (whether it's a single query or a multi-query file):
 
     ```python
       db.execute_file_and_save(file_name, result_file_path, result_file_type=FileType.CSV)
       ```
 
-    `FileType` is an enum that supports the following formats: CSV, TXT, and Excel.
+    Note: `FileType` is an enum that supports the following formats: CSV, TXT, and Excel.
 
     **Saving Logic**:
 
     -   If the file contains multiple queries, each query will be saved in a separate file, with an index number appended to the result_file_path.
+
 3.  **Executing a Folder and Saving Results**: To execute all SQL files inside a folder and save the results:
 
     ```python
@@ -69,6 +65,7 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 
     -   The function opens and executes each file in the folder.
     -   For each query in each file, a separate result file is created. The result file name will follow the original file name from the folder, with the index number of the queries appended.
+
 4.  **Additional Parameters**: Both execute_file_and_save and execute_folder_and_save allow additional parameters like batch_size and row_limit. These parameters apply to all queries in the given file.
 
     You can also use specific comments to control pagination and row limits for individual queries:
@@ -89,9 +86,7 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
 
     You can combine both comments for more control, and they will only apply to the query directly below them. The batch_size and row_limit parameters passed to the functions will not affect these queries.'
 
-## How to use it Programmatically
-
-### Here is how you can fetch results and utilize mapping method
+### Advanced Usage
 These will use server-side cursors to fetch the results, By default oracle has server-side cursors.
 
 1.  You can get queries by file:
@@ -144,7 +139,7 @@ These will use server-side cursors to fetch the results, By default oracle has s
        for instance in instances:
            print(instance.lifecycle_stage)
    ```
-### Here is how you can use Data Manipulation Language (DML) commands
+### Data Manipulation Language (DML) commands
 
 ```python
 @retry_transaction()

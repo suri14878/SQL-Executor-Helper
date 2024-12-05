@@ -184,7 +184,7 @@ class PostgresConnection(GeneralConnection):
                 dbname=config[env_section]['dbname'],
                 row_factory=UniqueDictRowFactory
             )
-            self.logger.info(f"Connected to PostgreSQL database: {config[env_section]['dbname']}")
+            self.logger.debug(f"Connected to PostgreSQL database: {config[env_section]['dbname']}")
 
         except (psycopg.OperationalError, configparser.Error) as e:
             self.logger.error(f"Failed to connect to PostgreSQL: {str(e)}")
@@ -198,7 +198,7 @@ class PostgresConnection(GeneralConnection):
         """Closes the PostgreSQL database connection."""
         if self.__connection:
             self.__connection.close()
-            self.logger.info("PostgreSQL connection closed.")
+            self.logger.debug("PostgreSQL connection closed.")
 
     def commit(self):
         """It just commits!"""
@@ -239,7 +239,7 @@ class PostgresCursor(GeneralCursor):
         """Executes a SQL query using the PostgreSQL cursor."""
         try:
             self.__cursor.execute(query, params)
-            self.logger.info("Executed query on PostgreSQL.")
+            self.logger.debug("Executed query on PostgreSQL.")
         except psycopg.Error as e:
             self.logger.error(f"Failed to execute query on PostgreSQL: {str(e)}")
             raise
@@ -273,17 +273,26 @@ class OracleConnection(GeneralConnection):
             config = configparser.ConfigParser()
             config.read(config_file)
             env_section = f'{environment}_oracle'
-            dsn = oracledb.makedsn(
-                config[env_section]['host'],
-                config[env_section]['port'],
-                sid=config[env_section]['sid']
-            )
+            if config[env_section].get('sid') is not None:
+                dsn = oracledb.makedsn(
+                    config[env_section]['host'],
+                    config[env_section]['port'],
+                    sid=config[env_section]['sid']
+                )
+            elif config[env_section].get('service_name') is not None:
+                dsn = oracledb.makedsn(
+                    config[env_section]['host'],
+                    config[env_section]['port'],
+                    service_name=config[env_section]['service_name']
+                )
+            else:
+                dsn = None
             self.__connection = oracledb.connect(
                 user=config[env_section]['user'],
                 password=config[env_section]['password'],
                 dsn=dsn
             )
-            self.logger.info(f"Connected to Oracle database: {config[env_section]['sid']}")
+            self.logger.debug(f"Connected to Oracle database: {config[env_section]}")
 
         except (oracledb.DatabaseError, configparser.Error) as e:
             self.logger.error(f"Failed to connect to Oracle: {str(e)}")
@@ -298,7 +307,7 @@ class OracleConnection(GeneralConnection):
         """Closes the Oracle database connection."""
         if self.__connection:
             self.__connection.close()
-            self.logger.info("Oracle connection closed.")
+            self.logger.debug("Oracle connection closed.")
 
     def get_cursor(self, is_client_cursor = False):
         """Returns a generalized cursor object for Oracle."""
@@ -336,7 +345,7 @@ class OracleCursor(GeneralCursor):
         """Executes a SQL query using the Oracle cursor."""
         try:
             self.__cursor.execute(query, params or {})
-            self.logger.info("Executed query on Oracle.")
+            self.logger.debug("Executed query on Oracle.")
 
         except oracledb.DatabaseError as e:
             self.logger.error(f"Failed to execute query on Oracle: {str(e)}")
@@ -482,7 +491,7 @@ class SQLExecutor:
         try:
             # Check if the connection is None or has been closed
             if self.__db_connection is None or self.__db_connection.is_terminated():
-                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.logger.warning("Database connection is not active, attempting to reconnect.")
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
 
@@ -575,7 +584,7 @@ class SQLExecutor:
 
         # Check if the connection is None or has been closed
         if self.__db_connection is None or self.__db_connection.is_terminated():
-            self.logger.info("Database connection is not active, attempting to reconnect.")
+            self.logger.warning("Database connection is not active, attempting to reconnect.")
             self.__db_connection.connect(self.__config_file, self.__environment)
         else:
             # Check if the provided path is a valid directory
@@ -659,7 +668,7 @@ class SQLExecutor:
         try:
             # Check if the connection is None or has been closed
             if self.__db_connection is None or self.__db_connection.is_terminated():
-                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.logger.warning("Database connection is not active, attempting to reconnect.")
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
                 with self.__get_cursor() as cursor:
@@ -692,7 +701,7 @@ class SQLExecutor:
         """
         try:
             if self.__db_connection is None or self.__db_connection.is_terminated():
-                self.logger.info("Database connection is not active, attempting to reconnect.")
+                self.logger.warning("Database connection is not active, attempting to reconnect.")
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
                 objects = []
@@ -790,7 +799,7 @@ class SQLExecutor:
                 if include_header:
                     writer.writeheader()
                 writer.writerows(data)
-            self.logger.info(f"Data saved to {file_name} as CSV.")
+            self.logger.debug(f"Data saved to {file_name} as CSV.")
         except Exception as e:
             self.logger.error(f"Failed to save data to CSV: {str(e)}")
             raise
@@ -816,7 +825,7 @@ class SQLExecutor:
                 # Writing data
                 for row in data:
                     file.write('\t'.join(map(str, row.values())) + '\n')
-            self.logger.info(f"Data saved to {file_name} as TXT.")
+            self.logger.debug(f"Data saved to {file_name} as TXT.")
         except Exception as e:
             self.logger.error(f"Failed to save data to TXT: {str(e)}")
             raise
@@ -850,7 +859,7 @@ class SQLExecutor:
             for row in data:
                 ws.append(list(row.values()))
             wb.save(file_name)
-            self.logger.info(f"Data saved to {file_name} as Excel.")
+            self.logger.debug(f"Data saved to {file_name} as Excel.")
         except Exception as e:
             self.logger.error(f"Failed to save data to Excel: {str(e)}")
             raise()

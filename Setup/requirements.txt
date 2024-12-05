@@ -1,5 +1,6 @@
 oracledb==2.4.1                 # Used for connecting to oracle database
 configparser==7.1.0             # Used for reading config files
 psycopg[binary]==3.2.1          # Used for connecting to postgres database
-./Packages/logger-1.0.1.tar.gz  # Used for logging
+Logger @ git+https://github.com/ULL-IR-Office/Logger@main # Used for logging
+#./Packages/logger-1.0.1.tar.gz  # Used for logging
 openpyxl==3.1.5                 # Used for working with excel files
