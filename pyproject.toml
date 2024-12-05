@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Executor"
+version = "1.0.0"
+authors = [
+  { name="Blake Robert", email="ir@louisiana.edu" },
+  { name="Adarsh Vodnala", email="ir@louisiana.edu" },
+  { name="Surendar Kumar", email="ir@louisiana.edu" },
+]
+description = "The SQL Executor Helper project will help to interact with both Postgres and Oracle Databases. This will serve as the primary access pattern/system to submit SQL queries."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "oracledb==2.4.1",
+    "configparser==7.1.0",
+    "psycopg[binary]==3.2.1",
+    "logging==0.4.9.6",
+    "openpyxl==3.1.5"
+]
+
+[project.urls]
+Homepage = "https://github.com/ULL-IR-Office/SQL-Executor-Helper"
+Issues = "https://github.com/ULL-IR-Office/SQL-Executor-Helper/issues"
+
+[tool.setuptools.packages.find]
+include = ["Executor", "Executor.*"]

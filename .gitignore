@@ -3,6 +3,7 @@
 Logs/
 env_executor/
 Configs/
+dist/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

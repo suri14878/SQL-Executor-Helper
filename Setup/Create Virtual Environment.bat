@@ -3,7 +3,7 @@ setlocal
 
 rem sets the PROJ_DIR variable to the parent directory. 
 FOR %%A IN ("%~dp0.") DO set "PROJ_DIR=%%~dpA"
-set VENV_NAME=env_executor
+set VENV_NAME=venv
 
 rem Check if Python is installed
 python --version >nul 2>nul
