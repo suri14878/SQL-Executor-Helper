@@ -84,20 +84,31 @@ Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
         SELECT * FROM SampleTable;
       ```
 
-    You can combine both comments for more control, and they will only apply to the query directly below them. The batch_size and row_limit parameters passed to the functions will not affect these queries.'
+    You can combine both comments for more control, and they will only apply to the query directly below them. The batch_size and row_limit parameters passed to the functions will not affect these queries.
 
 ### Advanced Usage
 These will use server-side cursors to fetch the results, By default oracle has server-side cursors.
 
 1.  You can get queries by file:
      ```python
-      queries = db.get_queries_from_file('filename.sql')
+      queries = dbSQLExecutor.get_queries_from_file('filename.sql')
       ```
 2.  You can get query by index:
       ```python
-      queries = db.get_query_by_index('filename.sql', index=1)
+      queries = SQLExecutor.get_queries_from_file('filename.sql', index=1)
       ```
-3. You can get rows by batches and save them to specified file type:
+3.  You can get query by name:
+      ```python
+      queries = SQLExecutor.get_queries_from_file('filename.sql', name="QueryName")
+      ```
+
+    Name must be defined in the query as an additional parameter.
+       ```SQL 
+         /* NAME QueryName */
+        SELECT * FROM SampleTable;
+      ```
+
+4. You can get rows by batches and save them to specified file type:
       ```python
         batches = db.get_batches_by_query(query, page_size=3)
         for i, batch in enumerate(batches):
@@ -120,7 +131,7 @@ These will use server-side cursors to fetch the results, By default oracle has s
         print(rows)
       ```
       For more details (Postgres): https://www.psycopg.org/psycopg3/docs/basic/params.html
-4. There is a mapping method where we can map the fetched results into a list of provide class object. Below is the example of how you can use it.
+5. There is a mapping method where we can map the fetched results into a list of provide class object. Below is the example of how you can use it.
    ```python
    # This is a example of EventInstance class.
    class EventInstance:

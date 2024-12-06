@@ -506,10 +506,10 @@ class SQLExecutor:
                     query = query.strip()
                     if not query:  # Skip empty queries
                         continue
-
+                    
                     # Check if the query includes pagination (e.g., /* PAGINATE SIZE <number> */)
-                    is_paginate, query_page_size = self.__extract_pagination_info(query)
-                    is_rowlimit, query_row_limit = self.__extract_row_limit_info(query)
+                    is_paginate, query_page_size = SQLExecutor.extract_pagination_info(query)
+                    is_rowlimit, query_row_limit = SQLExecutor.extract_row_limit_info(query)
 
                     # Apply limit based of query comments or parameter
                     apply_limit = query_row_limit if is_rowlimit else row_limit
@@ -638,18 +638,28 @@ class SQLExecutor:
             self.logger.error(f"Failed to execute SQL file: {str(e)}")
             raise
 
-    def __extract_pagination_info(self, query):
+    @staticmethod
+    def extract_pagination_info(query):
         """Extracts the pagination information from multiline comments using the pattern '/* PAGINATE SIZE <number> */'."""
         match = re.search(r'/\*\s*PAGINATE\s+SIZE\s+(\d+)\s*\*/', query, flags=re.IGNORECASE)
         if match:
             return True, int(match.group(1))  # Return pagination flag and page size as an integer
         return False, None  # Return False if no pagination information is found
     
-    def __extract_row_limit_info(self, query):
+    @staticmethod
+    def extract_row_limit_info(query):
         """Extracts the row limit information from multiline comments using the pattern '/* ROW LIMIT <number> */'."""
         match = re.search(r'/\*\s*ROW\s+LIMIT\s+(\d+)\s*\*/', query, flags=re.IGNORECASE)
         if match:
             return True, int(match.group(1))  # Return pagination flag and page size as an integer
+        return False, None  # Return False if no pagination information is found
+    
+    @staticmethod
+    def extract_name_info(query):
+        """Extracts the name information from multiline comments using the pattern '/* NAME <queryname> */'."""
+        match = re.search(r'/\*\s*NAME\s*(\w+)\s*\*/', query, flags=re.IGNORECASE)
+        if match:
+            return True, match.group(1)  # Return pagination flag and page size as an integer
         return False, None  # Return False if no pagination information is found
 
     @retry(tries=3, delay=2, backoff=2, exceptions=(psycopg.OperationalError, oracledb.DatabaseError))
@@ -735,7 +745,7 @@ class SQLExecutor:
         self.__db_connection.close()
 
     @staticmethod
-    def get_queries_from_file(file_name, index=None) -> str or list:
+    def get_queries_from_file(file_name, index=None, Name=None) -> str or list:
         """
         Static Method Returns all queries or a specific query by index from a file.
 
@@ -755,6 +765,15 @@ class SQLExecutor:
             if 0 <= index < len(queries):
                 return queries[index]
             return None  # If the index is out of range, return None
+
+        if Name is not None:
+            # Return the query at the specified named query if it exists
+            for query in queries:
+                success, query_name = SQLExecutor.extract_name_info(query)
+                if success and query_name == Name:
+                    return query
+            return None
+        
         else:
             # Return all queries if no index is specified
             return queries
