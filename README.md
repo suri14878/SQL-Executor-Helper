@@ -91,7 +91,7 @@ These will use server-side cursors to fetch the results, By default oracle has s
 
 1.  You can get queries by file:
      ```python
-      queries = dbSQLExecutor.get_queries_from_file('filename.sql')
+      queries = SQLExecutor.get_queries_from_file('filename.sql')
       ```
 2.  You can get query by index:
       ```python
