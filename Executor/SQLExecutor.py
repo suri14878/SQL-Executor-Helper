@@ -813,7 +813,7 @@ class SQLExecutor:
             if not file_name.lower().endswith('.csv'):
                 file_name += '.csv'
 
-            with open(file_name, 'a' if is_append else 'w', newline='') as file:
+            with open(file_name, 'a' if is_append else 'w', newline='',  encoding='utf-8') as file:
                 writer = csv.DictWriter(file, fieldnames=data[0].keys())
                 if include_header:
                     writer.writeheader()
