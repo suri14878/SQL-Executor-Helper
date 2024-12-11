@@ -430,7 +430,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
     # Verification methods...
     def verify_csv_content(self, file_path, expected_data):
         """Verify the content of the CSV file."""
-        with open(file_path, mode='r') as file:
+        with open(file_path, mode='r', encoding="utf-8") as file:
             reader = csv.DictReader(file)
             rows = list(reader)
             self.assertEqual(len(rows), len(expected_data))
@@ -440,7 +440,7 @@ class TestSQLExecutorIntegration(unittest.TestCase):
 
     def verify_txt_content(self, file_path, expected_data):
         """Verify the content of the TXT file."""
-        with open(file_path, mode='r') as file:
+        with open(file_path, mode='r', encoding="utf-8") as file:
             lines = file.readlines()
             self.assertEqual(len(lines) - 1, len(expected_data))  # -1 for the header
             headers = lines[0].strip().split('\t')

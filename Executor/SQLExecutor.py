@@ -9,7 +9,6 @@ from openpyxl import Workbook, load_workbook
 from Executor.enums.file_types import FileType
 import logging
 import time
-import pandas as pd
 
 # Retry decorator with exponential backoff
 def retry(tries, delay=3, backoff=2, exceptions=(Exception,)):
@@ -496,7 +495,7 @@ class SQLExecutor:
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
 
-                with open(file_name, 'r') as file:
+                with open(file_name, 'r', encoding="utf-8") as file:
                     queries = file.read().split(';')
 
                 # This is to append count to the file name according to the number of queries a file have. Like (001, 002, 003, ...).
@@ -613,7 +612,7 @@ class SQLExecutor:
             None
         """
         try:
-            with open(file_name, 'r') as file:
+            with open(file_name, 'r', encoding="utf-8") as file:
                 queries = file.read().split(';')
                 queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
                 for query in queries:
@@ -745,7 +744,7 @@ class SQLExecutor:
         Returns:
             str or list: A specific query as a string if index is provided, or a list of queries otherwise.
         """
-        with open(file_name, 'r') as file:
+        with open(file_name, 'r', encoding="utf-8") as file:
             queries = file.read().split(';')
             queries = [query.strip() for query in queries if query.strip()]
 
@@ -964,12 +963,14 @@ class SQLExecutor:
 
     def __save_batches_to_excel(self, batches, file_name, is_append=False, include_header=True, apply_limit=None, apply_batch_size=None):
         """
-        Saves batched data to an Excel file efficiently by keeping the file open during processing.
+        Saves batched data to an Excel file using openpyxl, handling data in batches.
 
         Parameters:
             batches (generator): A generator that yields batches of data.
             file_name (str): The name of the Excel file.
+            is_append (bool): Whether to append to an existing file. Defaults to False.
             include_header (bool): Whether to include headers in the file. Defaults to True.
+            apply_limit (int): Maximum number of rows to write across all batches. Defaults to None.
 
         Returns:
             None
@@ -978,28 +979,42 @@ class SQLExecutor:
             if not file_name.lower().endswith('.xlsx'):
                 file_name += '.xlsx'
 
-            with pd.ExcelWriter(file_name, engine='openpyxl', mode='a' if is_append and os.path.exists(file_name) else 'w') as writer:
-                rows_fetched = 0
-                batch_index = 0 
-                for i, batch in enumerate(batches):
-                    if not batch:
-                        continue
-                    # This logic will check that batch_size should be within the row limits.
-                    if apply_limit:
-                        remaining_rows = apply_limit - rows_fetched
-                        if remaining_rows < apply_batch_size:
-                            batch = batch[:remaining_rows]
-                    df = pd.DataFrame(batch)
-                    df.to_excel(
-                        writer,
-                        index=False,
-                        header=(i == 0 and include_header),  # Include header only for the first batch
-                        startrow=writer.sheets['Sheet1'].max_row if i > 0 else 0
-                    )
-                    rows_fetched += len(batch)
-                    batch_index += 1
-                    if apply_limit and rows_fetched >= apply_limit:
-                        break
+            # Load existing workbook or create a new one
+            if is_append and os.path.exists(file_name):
+                wb = load_workbook(file_name)
+            else:
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Sheet1"
+
+            ws = wb.active
+            rows_fetched = 0 
+            batch_index = 0 
+
+            for batch in batches:
+                if not batch:
+                    continue
+
+                if apply_limit:
+                    remaining_rows = apply_limit - rows_fetched
+                    if remaining_rows < apply_batch_size:
+                        batch = batch[:remaining_rows]
+
+                # Write headers if this is the first row of a new sheet
+                if include_header and ws.max_row == 1:
+                    ws.append(list(batch[0].keys()))
+
+                # Write all rows in the batch at once
+                for row in batch:
+                    ws.append(list(row.values()))
+
+                rows_fetched += len(batch)
+                batch_index += 1
+                if apply_limit and rows_fetched >= apply_limit:
+                    break 
+
+            # Save the workbook
+            wb.save(file_name)
             self.logger.debug(f"Data successfully saved to {file_name} as Excel.")
         except Exception as e:
             self.logger.error(f"Failed to save batches to Excel: {str(e)}")
