@@ -111,9 +111,17 @@ These will use server-side cursors to fetch the results, By default oracle has s
 4. You can get rows by batches and save them to specified file type:
       ```python
         batches = db.get_batches_by_query(query, page_size=3)
+        db.save_results_in_batches(batches, 'test', result_file_type=FileType.EXCEL)
         for i, batch in enumerate(batches):
             db.save_to_csv(batch, 'test', is_append= True if i!=0 else False, include_header=True if i==0 else False)
       ```
+      You can use these additional parameters:
+      * `is_append= True` it is used to append content, default set to False.
+      * `include_header=True` it is used to put headers, default set to TRUE.
+      * `delimiter=','` it is used to specify delimiter when using the CSV file type, default set to ','.
+      * `apply_limit=None` it is used to apply row limit, default set to None.
+      * `apply_batch_size=None` it is used to specify batch size, default set to None.
+
       You can also pass parameters like below.  
       - **For Oracle:**
       ```python
@@ -153,8 +161,12 @@ These will use server-side cursors to fetch the results, By default oracle has s
 ### Data Manipulation Language (DML) commands
 
 ```python
-@retry_transaction()
-def insert_queries(db, config_file, environment):
+@retry_transaction(default_args={
+    'db': db,
+    'config_file': config_file,
+    'environment': environment
+})
+def insert_queries(db):
     with db.transaction():
     	# This function just executes all the queries from the file.
         db.execute_file('InsertQueriesFile.sql')
@@ -175,9 +187,9 @@ insert_queries()
 **Note:** Both the functions are not for fetching.
 
 1. In the above example, all the `INSERT` queries are wrapped within the `with db.transaction()` block, which acts as a context manager. This ensures that all changes are committed at the end of the block, and any error triggers an automatic rollback.
-2. To handle database connection failures, you can use the `@retry_transaction()` decorator from SQL Executor. This decorator will automatically retry the database connection if it fails and re-execute the `insert_queries` function. For this to work, the `insert_queries` function must accept `config_file` and `environment` as parameters.
+2. To handle database connection failures, you can use the `@retry_transaction()` decorator from SQL Executor. This decorator will automatically retry the database connection if it fails and re-execute the `insert_queries` function. For this to work, the `@retry_transaction()` decorator must have default_args dictionary  that has `db`,`config_file` and `environment`.
 3. Additionally, you can pass custom parameters to `@retry_transaction()`, such as:
    * `tries:` The number of attempts before giving up.
    * `delay:` The initial delay between attempts, in seconds.
    * `backoff:` A multiplier that increases the delay after each retry.  
-**For example:** `@retry_transaction(tries=3, delay=3, backoff=2)`.
+**For example:** `@retry_transaction(default_args, tries=3, delay=3, backoff=2)`.
