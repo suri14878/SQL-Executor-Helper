@@ -756,7 +756,7 @@ class SQLExecutor:
         Returns:
             str or list: A specific query as a string if index is provided, or a list of queries otherwise.
         """
-        with open(file_name, 'r') as file:
+        with open(file_name, 'r', encoding="utf-8") as file:
             queries = file.read().split(';')
             queries = [query.strip() for query in queries if query.strip()]
 
