@@ -765,6 +765,12 @@ class SQLExecutor:
         else:
             # Return all queries if no index is specified
             return queries
+    
+    def __ensure_directory_exists(self, file_path):
+        directory = os.path.dirname(file_path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+            self.logger.warning(f"No folder found, Creating {directory} folder.")
         
     def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True, delimiter=',') -> None:
         """
@@ -780,6 +786,7 @@ class SQLExecutor:
         Returns:
             None
         """
+        self.__ensure_directory_exists(result_file)
         if result_file_type == FileType.CSV:
             self.__save_to_csv(data,result_file, delimiter, is_append, include_header)    
         elif result_file_type == FileType.TXT:
@@ -800,6 +807,7 @@ class SQLExecutor:
         Returns:
             None
         """
+        self.__ensure_directory_exists(result_file)
         if result_file_type == FileType.EXCEL:
             self.__save_batches_to_excel(batches, result_file, is_append, include_header, apply_limit, apply_batch_size)
         elif result_file_type == FileType.TXT:
