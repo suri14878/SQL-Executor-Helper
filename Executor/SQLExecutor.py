@@ -495,7 +495,7 @@ class SQLExecutor:
                 self.__db_connection.connect(self.__config_file, self.__environment)
             else:
 
-                with open(file_name, 'r') as file:
+                with open(file_name, 'r', encoding="utf-8") as file:
                     queries = file.read().split(';')
 
                 # This is to append count to the file name according to the number of queries a file have. Like (001, 002, 003, ...).
@@ -524,20 +524,8 @@ class SQLExecutor:
                     # Handle queries with batch sizes (including 1)
                     if apply_batch_size:
                         # Fetch rows in specified batch sizes
-                        rows_fetched = 0
                         batches = self.get_batches_by_query(query, apply_batch_size)
-                        batch_index = 0 
-                        for batch in batches:
-                            # This logic will check that batch_size should be within the row limits.
-                            if apply_limit:
-                                remaining_rows = apply_limit - rows_fetched
-                                if remaining_rows < apply_batch_size:
-                                    batch = batch[:remaining_rows]
-                            self.save_results(batch, f"{result_file_path}_{str(i + 1).zfill(preceding_zeros)}", result_file_type, is_append=True, include_header=True if batch_index==0 else False)
-                            rows_fetched += len(batch)
-                            batch_index += 1
-                            if apply_limit and rows_fetched >= apply_limit:
-                                break
+                        self.save_results_in_batches(batches, f"{result_file_path}_{str(i + 1).zfill(preceding_zeros)}", result_file_type, apply_limit=apply_limit, apply_batch_size=apply_batch_size)
                     else:
                         try:
                             with self.__get_cursor() as cursor:
@@ -548,7 +536,7 @@ class SQLExecutor:
                                 else:
                                     rows = cursor.fetchall()
                                 if result_file_type == FileType.CSV:
-                                    self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
+                                    self.__save_to_csv(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}", delimiter=',')    
                                 elif result_file_type == FileType.TXT:
                                     self.__save_to_txt(rows,f"{result_file_path}_{str(i+1).zfill(preceding_zeros)}")    
                                 elif result_file_type == FileType.EXCEL:
@@ -624,7 +612,7 @@ class SQLExecutor:
             None
         """
         try:
-            with open(file_name, 'r') as file:
+            with open(file_name, 'r', encoding="utf-8") as file:
                 queries = file.read().split(';')
                 queries = [query.strip() for query in queries if query.strip()]  # Clean empty queries
                 for query in queries:
@@ -777,8 +765,14 @@ class SQLExecutor:
         else:
             # Return all queries if no index is specified
             return queries
+    
+    def __ensure_directory_exists(self, file_path):
+        directory = os.path.dirname(file_path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+            self.logger.warning(f"No folder found, Creating {directory} folder.")
         
-    def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True) -> None:
+    def save_results(self, data, result_file, result_file_type: FileType, is_append=False, include_header=True, delimiter=',') -> None:
         """
         Saves data to a file in the specified format.
 
@@ -792,14 +786,48 @@ class SQLExecutor:
         Returns:
             None
         """
+        self.__ensure_directory_exists(result_file)
         if result_file_type == FileType.CSV:
-            self.__save_to_csv(data,result_file, is_append, include_header)    
+            self.__save_to_csv(data,result_file, delimiter, is_append, include_header)    
         elif result_file_type == FileType.TXT:
-            self.__save_to_txt(data,result_file, is_append, include_header)    
+            self.__save_to_txt(data,result_file, is_append, include_header)  
         elif result_file_type == FileType.EXCEL:
             self.__save_to_excel(data,result_file, is_append, include_header)   
 
-    def __save_to_csv(self, data, file_name, is_append=False, include_header=True):
+    def save_results_in_batches(self, batches, result_file, result_file_type: FileType, is_append=False, include_header=True, delimiter=',', apply_limit=None, apply_batch_size=None):
+        """
+        Saves batched data to a file efficiently, keeping the file open until all batches are processed.
+
+        Parameters:
+            batches (generator): A generator that yields batches of data.
+            result_file (str): The name of the file to save the data.
+            result_file_type (FileType): The format to save the data (CSV or Excel).
+            include_header (bool): Whether to include headers in the file. Defaults to True.
+
+        Returns:
+            None
+        """
+        self.__ensure_directory_exists(result_file)
+        if result_file_type == FileType.EXCEL:
+            self.__save_batches_to_excel(batches, result_file, is_append, include_header, apply_limit, apply_batch_size)
+        elif result_file_type == FileType.TXT:
+            rows_fetched = 0
+            batch_index = 0 
+            for i,batch in enumerate(batches):
+                # This logic will check that batch_size should be within the row limits.
+                if apply_limit:
+                    remaining_rows = apply_limit - rows_fetched
+                    if remaining_rows < apply_batch_size:
+                        batch = batch[:remaining_rows]
+                self.__save_to_txt(batch,result_file, is_append= True if i!=0 else False, include_header=True if i==0 else False)
+                rows_fetched += len(batch)
+                batch_index += 1
+                if apply_limit and rows_fetched >= apply_limit:
+                    break  
+        elif result_file_type == FileType.CSV:
+            self.__save_batches_to_csv(batches, result_file, delimiter, is_append, include_header, apply_limit, apply_batch_size)
+
+    def __save_to_csv(self, data, file_name, delimiter, is_append=False, include_header=True):
         """Saves data to a CSV file with column names."""
         try:
             if not data:  # Check if data is empty
@@ -814,11 +842,69 @@ class SQLExecutor:
                 file_name += '.csv'
 
             with open(file_name, 'a' if is_append else 'w', newline='',  encoding='utf-8') as file:
-                writer = csv.DictWriter(file, fieldnames=data[0].keys())
+                writer = csv.DictWriter(file, fieldnames=data[0].keys(), delimiter=delimiter)
                 if include_header:
                     writer.writeheader()
                 writer.writerows(data)
             self.logger.debug(f"Data saved to {file_name} as CSV.")
+        except Exception as e:
+            self.logger.error(f"Failed to save data to CSV: {str(e)}")
+            raise
+
+
+    def __save_batches_to_csv(self, all_batches, file_name, delimiter, is_append=False, include_header=True, apply_limit=None, apply_batch_size=None):
+        """
+        Saves all batches of data to a CSV file with column names.
+
+        Parameters:
+            all_batches (list): A list of batches where each batch is a list of dictionaries.
+            file_name (str): The name of the CSV file.
+            is_append (bool): Whether to append to the file if it exists.
+            include_header (bool): Whether to include headers in the file.
+            delimiter (str): The delimiter to use in the CSV file. Defaults to ','.
+
+        Returns:
+            None
+        """
+        try:
+            if not all_batches:  # Check if there are any batches
+                self.logger.warning(f"No data to save to {file_name}. The file will not be created.")
+                return
+            
+            # Ensure the file name has a .csv extension
+            if not file_name.lower().endswith('.csv'):
+                file_name += '.csv'
+
+            with open(file_name, 'a' if is_append else 'w', newline='', encoding='utf-8') as file:
+                rows_fetched = 0
+                batch_index = 0 
+                for i, batch in enumerate(all_batches):
+                    if not batch:  # Skip empty batches
+                        continue
+                    # This logic will check that batch_size should be within the row limits.
+                    if apply_limit:
+                        remaining_rows = apply_limit - rows_fetched
+                        if remaining_rows < apply_batch_size:
+                            batch = batch[:remaining_rows]
+            
+                    if isinstance(batch, dict):  # If data is a single dictionary, wrap it in a list
+                        batch = [batch]
+
+                    # Determine if the header should be included for this batch
+                    write_header = include_header and not i > 0
+
+                    # Write all rows to the CSV file
+                    writer = csv.DictWriter(file, fieldnames=batch[0].keys(), delimiter=delimiter)
+                    if write_header:
+                        writer.writeheader()
+                    writer.writerows(batch)
+
+                    rows_fetched += len(batch)
+                    batch_index += 1
+                    if apply_limit and rows_fetched >= apply_limit:
+                        break
+
+            self.logger.debug(f"Data successfully saved to {file_name} as CSV.")
         except Exception as e:
             self.logger.error(f"Failed to save data to CSV: {str(e)}")
             raise
@@ -882,3 +968,64 @@ class SQLExecutor:
         except Exception as e:
             self.logger.error(f"Failed to save data to Excel: {str(e)}")
             raise()
+
+    def __save_batches_to_excel(self, batches, file_name, is_append=False, include_header=True, apply_limit=None, apply_batch_size=None):
+        """
+        Saves batched data to an Excel file using openpyxl, handling data in batches.
+
+        Parameters:
+            batches (generator): A generator that yields batches of data.
+            file_name (str): The name of the Excel file.
+            is_append (bool): Whether to append to an existing file. Defaults to False.
+            include_header (bool): Whether to include headers in the file. Defaults to True.
+            apply_limit (int): Maximum number of rows to write across all batches. Defaults to None.
+
+        Returns:
+            None
+        """
+        try:
+            if not file_name.lower().endswith('.xlsx'):
+                file_name += '.xlsx'
+
+            # Load existing workbook or create a new one
+            if is_append and os.path.exists(file_name):
+                wb = load_workbook(file_name)
+            else:
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Sheet1"
+
+            ws = wb.active
+            rows_fetched = 0 
+            batch_index = 0 
+
+            for batch in batches:
+                if not batch:
+                    continue
+
+                if apply_limit:
+                    remaining_rows = apply_limit - rows_fetched
+                    if remaining_rows < apply_batch_size:
+                        batch = batch[:remaining_rows]
+
+                # Write headers if this is the first row of a new sheet
+                if include_header and ws.max_row == 1:
+                    ws.append(list(batch[0].keys()))
+
+                # Write all rows in the batch at once
+                for row in batch:
+                    ws.append(list(row.values()))
+
+                rows_fetched += len(batch)
+                batch_index += 1
+                if apply_limit and rows_fetched >= apply_limit:
+                    break 
+
+            # Save the workbook
+            wb.save(file_name)
+            self.logger.debug(f"Data successfully saved to {file_name} as Excel.")
+        except Exception as e:
+            self.logger.error(f"Failed to save batches to Excel: {str(e)}")
+            raise
+
+    
