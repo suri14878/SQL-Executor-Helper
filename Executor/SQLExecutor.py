@@ -739,14 +739,31 @@ class SQLExecutor:
 
         Parameters:
             file_name (str): The path to the file containing SQL queries.
-            index (int, optional): The index of the query to return. If None, all queries are returned.
-
+            index (int, optional): The index of the query to return.
+            Name (str, optional): The name of the query to return.
+           
         Returns:
-            str or list: A specific query as a string if index is provided, or a list of queries otherwise.
+            str or list: A specific query as a string if index or Name is provided, or a list of queries otherwise.
         """
         with open(file_name, 'r', encoding="utf-8") as file:
-            queries = file.read().split(';')
-            queries = [query.strip() for query in queries if query.strip()]
+            file_contents = file.read()
+        return SQLExecutor.get_queries_from_str(query_str = file_contents, index = index, Name = Name)
+
+    @staticmethod
+    def get_queries_from_str(query_str, index=None, Name=None) -> str or list:
+        """
+        Static Method Returns all queries or a specific query by index from a string. (typically read from a file already)
+
+        Parameters:
+            query_str (str): A string object that contains SQL queries.
+            index (int, optional): The index of the query to return.
+            Name (str, optional): The name of the query to return.
+           
+        Returns:
+            str or list: A specific query as a string if index or Name is provided, or a list of queries otherwise.
+        """
+        queries = query_str.split(';')
+        queries = [query.strip() for query in queries if query.strip()]
 
         if index is not None:
             # Return the query at the specified index if it exists
@@ -763,9 +780,12 @@ class SQLExecutor:
             return None
         
         else:
-            # Return all queries if no index is specified
+            # Return all queries if no index or Name is specified
             return queries
-    
+
+
+
+
     def __ensure_directory_exists(self, file_path):
         directory = os.path.dirname(file_path)
         if directory and not os.path.exists(directory):

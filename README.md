@@ -93,13 +93,15 @@ These will use server-side cursors to fetch the results, By default oracle has s
      ```python
       queries = SQLExecutor.get_queries_from_file('filename.sql')
       ```
-2.  You can get query by index:
+2.  You can get query by index from either a file or an already read string object:
       ```python
       queries = SQLExecutor.get_queries_from_file('filename.sql', index=1)
+      queries = SQLExecutor.get_queries_from_str(read_query_str, index=1)
       ```
-3.  You can get query by name:
+3.  You can get query by name from either a file or an already read string object:
       ```python
       queries = SQLExecutor.get_queries_from_file('filename.sql', name="QueryName")
+      queries = SQLExecutor.get_queries_from_str(read_query_str, name="QueryName")
       ```
 
     Name must be defined in the query as an additional parameter.
