@@ -6,9 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "Executor"
 version = "1.0.0"
 authors = [
-  { name="Blake Robert", email="ir@louisiana.edu" },
-  { name="Adarsh Vodnala", email="ir@louisiana.edu" },
-  { name="Surendar Kumar", email="ir@louisiana.edu" },
+  { name="Surendar Kumar", email="srk14878@gmail.com" },
 ]
 description = "The SQL Executor Helper project will help to interact with both Postgres and Oracle Databases. This will serve as the primary access pattern/system to submit SQL queries."
 readme = "README.md"
@@ -27,8 +25,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/ULL-IR-Office/SQL-Executor-Helper"
-Issues = "https://github.com/ULL-IR-Office/SQL-Executor-Helper/issues"
+Homepage = "https://github.com/suri14878/SQL-Executor-Helper"
+Issues = "https://github.com/suri14878/SQL-Executor-Helper/issues"
 
 [tool.setuptools.packages.find]
 include = ["Executor", "Executor.*"]

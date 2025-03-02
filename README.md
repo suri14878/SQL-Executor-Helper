@@ -4,11 +4,11 @@ This project will help to interact with both Postgres and Oracle Databases. This
 ### Installation with git credentials (easiest):
 To include the project, add the following line to your requirements.txt. You will have to be logged into your git account on the host machine.
 ```
-Executor @ git+https://github.com/ULL-IR-Office/SQL-Executor-Helper@main
+Executor @ git+https://github.com/suri14878/SQL-Executor-Helper@main
 ```
 ### Installation without git credentials
 1. Clone the repository:
-   ```git clone https://github.com/ULL-IR-Office/SQL-Executor-Helper.git```
+   ```git clone https://github.com/suri14878/SQL-Executor-Helper.git```
 
 2. Set up a Python virtual environment. For windows, there is a `Create Virtual Environment.bat` file within the `Batch Scripts` subfolder that will automatically set up the virtual environment and all dependencies.
 3. Build the package using `Create_Python_Package.bat`file within the `Batch Scripts` subfolder that will automatically builds the package. It will drop the tar.gz and wheel file into a dist subfolder. Alternatively, you call the following two commands from the project directory.
